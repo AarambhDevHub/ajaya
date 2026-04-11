@@ -23,7 +23,7 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 By participating, you are expected to uphold this code.
 
 To report unacceptable behavior, use one of these channels:
-- **Discord:** Join the [Aarambh Dev Hub Discord](https://discord.gg/) and open a private message to the maintainer
+- **Discord:** Join the [Aarambh Dev Hub Discord](https://discord.gg/HDth6PfCnp) and open a private message to the maintainer
 - **GitHub:** Open a [private security advisory](https://github.com/AarambhDevHub/ajaya/security/advisories/new) for sensitive reports
 
 ---
@@ -82,7 +82,7 @@ curl http://localhost:8080
 - Check the [ROADMAP.md](ROADMAP.md) for the current milestone
 - Look for [open issues](https://github.com/AarambhDevHub/ajaya/issues) tagged `good first issue` or `help wanted`
 - Check if the feature you want is already planned in the roadmap
-- Ask in the [Aarambh Dev Hub Discord](https://discord.gg/) if you're unsure where to start
+- Ask in the [Aarambh Dev Hub Discord](https://discord.gg/HDth6PfCnp) if you're unsure where to start
 
 ### 2. Fork and Branch
 
@@ -250,7 +250,7 @@ What actually happened.
 1. Check the [ROADMAP.md](ROADMAP.md) — it might already be planned
 2. Open a [GitHub Discussion](https://github.com/AarambhDevHub/ajaya/discussions) first for larger features
 3. For smaller features, open an issue with the `enhancement` label
-4. Chat about ideas in the [Aarambh Dev Hub Discord](https://discord.gg/) `#ajaya` channel
+4. Chat about ideas in the [Aarambh Dev Hub Discord](https://discord.gg/HDth6PfCnp) `#ajaya` channel
 
 ---
 
@@ -277,7 +277,7 @@ When contributing, it helps to know where things live:
 
 ## Community
 
-- 💬 **Discord:** [Aarambh Dev Hub](https://discord.gg/) — `#ajaya` channel for questions and discussion
+- 💬 **Discord:** [Aarambh Dev Hub](https://discord.gg/HDth6PfCnp) — `#ajaya` channel for questions and discussion
 - 🐙 **GitHub Discussions:** [github.com/AarambhDevHub/ajaya/discussions](https://github.com/AarambhDevHub/ajaya/discussions)
 - 📺 **YouTube:** [Aarambh Dev Hub](https://youtube.com/@AarambhDevHub) — follow the build in public series
 

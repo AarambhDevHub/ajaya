@@ -7,7 +7,7 @@
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
 [![Version](https://img.shields.io/badge/version-0.0.1-green.svg)](CHANGELOG.md)
-[![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/)
+[![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
 
@@ -17,7 +17,7 @@
 
 **Ajaya** (अजय, *"The Unconquerable"*) is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**. It aims to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> ⚠️ **v0.0.1 — Workspace Bootstrap.** This is the very first milestone. The framework compiles and runs a basic HTTP server. All advanced features are coming in subsequent versions — follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/) to track progress.
+> ⚠️ **v0.0.1 — Workspace Bootstrap.** This is the very first milestone. The framework compiles and runs a basic HTTP server. All advanced features are coming in subsequent versions — follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -121,7 +121,7 @@ cargo test --workspace
 
 | Platform | Link | Purpose |
 |----------|------|---------|
-| 💬 Discord | [Aarambh Dev Hub](https://discord.gg/) | Questions, discussion, dev updates |
+| 💬 Discord | [Aarambh Dev Hub](https://discord.gg/HDth6PfCnp) | Questions, discussion, dev updates |
 | 📺 YouTube | [Aarambh Dev Hub](https://youtube.com/@AarambhDevHub) | Build-in-public video series |
 | 🐙 GitHub Discussions | [Discussions](https://github.com/AarambhDevHub/ajaya/discussions) | Feature proposals, Q&A |
 | 🐛 GitHub Issues | [Issues](https://github.com/AarambhDevHub/ajaya/issues) | Bug reports |
