@@ -18,8 +18,8 @@
 //! }
 //! ```
 
-pub mod server;
 pub mod serve;
+pub mod server;
 
 pub use serve::serve;
 pub use server::Server;

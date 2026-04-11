@@ -26,5 +26,5 @@
 pub use ajaya_core::*;
 
 // Re-export server functionality
-pub use ajaya_hyper::serve;
 pub use ajaya_hyper::Server;
+pub use ajaya_hyper::serve;
