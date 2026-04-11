@@ -1,0 +1,100 @@
+[workspace]
+members = [
+    "ajaya",
+    "ajaya-core",
+    "ajaya-router",
+    "ajaya-hyper",
+    "ajaya-extract",
+    "ajaya-middleware",
+    "ajaya-ws",
+    "ajaya-sse",
+    "ajaya-static",
+    "ajaya-tls",
+    "ajaya-macros",
+    "ajaya-test",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AarambhDevHub/ajaya"
+authors = ["Aarambh Dev Hub"]
+rust-version = "1.85"
+description = "The Unconquerable Rust Web Framework"
+
+[workspace.dependencies]
+# Async runtime
+tokio          = { version = "1", features = ["full"] }
+tokio-stream   = "0.1"
+
+# HTTP
+hyper          = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util     = { version = "0.1", features = ["tokio", "server-auto", "http1", "http2"] }
+http           = "1"
+http-body      = "1"
+http-body-util = "0.1"
+
+# Tower
+tower          = { version = "0.5", features = ["full"] }
+tower-http     = { version = "0.6", features = ["full"] }
+tower-layer    = "0.3"
+tower-service  = "0.3"
+
+# Bytes
+bytes          = "1"
+
+# Serde
+serde          = { version = "1", features = ["derive"] }
+serde_json     = "1"
+serde_urlencoded = "0.7"
+
+# WebSocket
+tokio-tungstenite = "0.24"
+
+# TLS
+rustls         = "0.23"
+tokio-rustls   = "0.26"
+rustls-pemfile = "2"
+
+# Multipart
+multer         = "3"
+
+# Compression
+async-compression = { version = "0.4", features = ["gzip", "br", "zstd", "deflate"] }
+
+# Routing
+matchit        = "0.8"
+
+# Utilities
+pin-project-lite = "0.2"
+futures-util   = "0.3"
+ahash          = "0.8"
+smallvec       = { version = "1", features = ["union"] }
+parking_lot    = "0.12"
+thiserror      = "2"
+tracing        = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid           = { version = "1", features = ["v4"] }
+mime           = "0.3"
+percent-encoding = "2"
+itoa           = "1"
+
+# Proc macro (ajaya-macros only)
+syn            = { version = "2", features = ["full"] }
+quote          = "1"
+proc-macro2    = "1"
+
+# Internal crates
+ajaya-core       = { path = "ajaya-core", version = "0.0.1" }
+ajaya-router     = { path = "ajaya-router", version = "0.0.1" }
+ajaya-hyper      = { path = "ajaya-hyper", version = "0.0.1" }
+ajaya-extract    = { path = "ajaya-extract", version = "0.0.1" }
+ajaya-middleware = { path = "ajaya-middleware", version = "0.0.1" }
+ajaya-ws         = { path = "ajaya-ws", version = "0.0.1" }
+ajaya-sse        = { path = "ajaya-sse", version = "0.0.1" }
+ajaya-static     = { path = "ajaya-static", version = "0.0.1" }
+ajaya-tls        = { path = "ajaya-tls", version = "0.0.1" }
+ajaya-macros     = { path = "ajaya-macros", version = "0.0.1" }
+ajaya-test       = { path = "ajaya-test", version = "0.0.1" }

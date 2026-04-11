@@ -1,0 +1,11 @@
+[package]
+name = "ajaya-sse"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Server-Sent Events for the Ajaya web framework"
+
+[dependencies]
