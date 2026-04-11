@@ -28,12 +28,12 @@
 ### `0.0.1` — Workspace Bootstrap
 **Goal:** Repo exists, compiles, does nothing useful yet.
 
-- [ ] Initialize Cargo workspace with all 12 crates
-- [ ] All `Cargo.toml` files with correct dependencies
-- [ ] `ajaya-core`: empty `lib.rs` stubs for `Request`, `Response`, `Body`, `Error`
-- [ ] `ajaya-hyper`: raw Tokio + Hyper 1.x TCP listener (hardcoded "Hello World" response)
-- [ ] CI: GitHub Actions — `cargo check`, `cargo clippy`, `cargo test`
-- [ ] `README.md` skeleton
+- [x] Initialize Cargo workspace with all 12 crates
+- [x] All `Cargo.toml` files with correct dependencies
+- [x] `ajaya-core`: empty `lib.rs` stubs for `Request`, `Response`, `Body`, `Error`
+- [x] `ajaya-hyper`: raw Tokio + Hyper 1.x TCP listener (hardcoded "Hello World" response)
+- [x] CI: GitHub Actions — `cargo check`, `cargo clippy`, `cargo test`
+- [x] `README.md` skeleton
 
 **Deliverable:** `cargo run` → server starts on port 8080, returns "Hello from Ajaya" to every request.
 
