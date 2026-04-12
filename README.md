@@ -66,8 +66,8 @@ async fn user(req: Request) -> Json<serde_json::Value> {
 async fn main() {
     let app = Router::new()
         .route("/", get(|| async { "Home" }))
-        .route("/users/:id", get(user))
-        .route("/files/*path", get(|| async { "File content" }));
+        .route("/users/{id}", get(user))
+        .route("/files/{*path}", get(|| async { "File content" }));
 
     serve_app("0.0.0.0:8080", app).await.unwrap();
 }

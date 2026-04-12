@@ -122,25 +122,25 @@
 ---
 
 ### `0.1.2` — Path Parameters
-**Goal:** `:param` segments in routes.
+**Goal:** `{param}` segments in routes.
 
-- [x] Parse `:name` segments during route registration
+- [x] Parse `{name}` segments during route registration
 - [x] Extract param values during lookup
 - [x] Store in `PathParams` on request extensions
-- [x] Support multiple params: `/users/:id/posts/:post_id`
+- [x] Support multiple params: `/users/{id}/posts/{post_id}`
 - [x] URL decode param values
 
-**Deliverable:** `/users/42` matches `/users/:id` and extracts `id = "42"`.
+**Deliverable:** `/users/42` matches `/users/{id}` and extracts `id = "42"`.
 
 ---
 
 ### `0.1.3` — Wildcard Routes
-**Goal:** `*path` catch-all segments.
+**Goal:** `{*path}` catch-all segments.
 
 - [x] Parse `*name` wildcard during registration
 - [x] Wildcard captures remainder of path including slashes
 - [x] Wildcard has lowest priority (static > param > wildcard)
-- [x] `/files/*path` matches `/files/a/b/c.txt` → `path = "a/b/c.txt"`
+- [x] `/files/{*path}` matches `/files/a/b/c.txt` → `path = "a/b/c.txt"`
 
 **Deliverable:** Wildcard routes work, priority order correct.
 

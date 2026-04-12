@@ -35,7 +35,7 @@ async fn user(req: Request) -> String {
 async fn main() {
     let app = Router::new()
         .route("/", get(hello))
-        .route("/users/:id", get(user));
+        .route("/users/{id}", get(user));
         
     serve_app("0.0.0.0:8080", app).await.unwrap();
 }

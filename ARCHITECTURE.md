@@ -349,9 +349,9 @@ impl MethodRouter<S> {
 ```
 /                           → root
 /users                      → static
-/users/:id                  → path parameter
-/users/:id/posts/:post_id   → multiple params
-/files/*path                → wildcard (captures rest of path)
+/users/{id}                  → path parameter
+/users/{id}/posts/{post_id}   → multiple params
+/files/{*path}                → wildcard (captures rest of path)
 /api/v{version}/users       → inline param
 ```
 
@@ -362,16 +362,16 @@ impl MethodRouter<S> {
                    /    \
                [users]  [files]
                /    \       \
-           [/:id]  [/me]   [/*path]
+           [/{id}]  [/me]   [/{*path}]
             /
         [/posts]
             \
-         [/:post_id]
+         [/{post_id}]
 ```
 
 - Each node stores: `prefix: &'static str`, `handler: Option<MethodRouter>`, `children: SmallVec<[Node; 4]>`, `param_child: Option<Box<Node>>`, `wildcard_child: Option<Box<Node>>`
 - Hot path: zero heap allocation for routing (params stored in stack-allocated `SmallVec`)
-- Conflict detection at startup (`/users/:id` vs `/users/me` → panic with clear message)
+- Conflict detection at startup (`/users/{id}` vs `/users/me` → panic with clear message)
 
 ---
 
