@@ -76,8 +76,8 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     ///
     /// The path must start with `/`. Supports:
     /// - Static: `/users`
-    /// - Parameters: `/users/:id`
-    /// - Wildcards: `/files/*path`
+    /// - Parameters: `/users/{id}`
+    /// - Wildcards: `/files/{*path}`
     ///
     /// # Panics
     ///
@@ -324,8 +324,8 @@ mod tests {
             "test"
         }
         let _router: Router<()> = Router::new()
-            .route("/users/:id", crate::get(handler))
-            .route("/users/:id/posts/:post_id", crate::get(handler));
+            .route("/users/{id}", crate::get(handler))
+            .route("/users/{id}/posts/{post_id}", crate::get(handler));
     }
 
     #[test]
@@ -334,7 +334,7 @@ mod tests {
             "test"
         }
         let _router: Router<()> = Router::new()
-            .route("/files/*path", crate::get(handler))
+            .route("/files/{*path}", crate::get(handler))
             .route("/", crate::get(handler));
     }
 
@@ -345,7 +345,7 @@ mod tests {
         }
         let sub = Router::new()
             .route("/", crate::get(handler))
-            .route("/:id", crate::get(handler));
+            .route("/{id}", crate::get(handler));
 
         let _app: Router<()> = Router::new()
             .route("/", crate::get(handler))

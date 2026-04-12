@@ -99,8 +99,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(health))
         .route("/users", get(list_users).post(create_user))
-        .route("/users/:id", get(get_user))
-        .route("/files/*path", get(serve_file))
+        .route("/users/{id}", get(get_user))
+        .route("/files/{*path}", get(serve_file))
         .fallback(not_found);
 
     if let Err(e) = serve_app("0.0.0.0:8080", app).await {

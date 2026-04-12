@@ -33,14 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `Router::nest(prefix, sub_router)` — compose routers under path prefixes
 - Flatten strategy: nested routes inserted into parent trie at registration time
-- Path parameters in prefixes work: `.nest("/users/:id", user_router)`
+- Path parameters in prefixes work: `.nest("/users/{id}", user_router)`
 
 ---
 
 ## [0.1.3] — 2026-04-12 — Wildcard Routes
 
 ### Added
-- Wildcard catch-all segments: `/files/*path`
+- Wildcard catch-all segments: `/files/{*path}`
 - Priority ordering: static > param > wildcard (native matchit behavior)
 - Wildcard values URL-decoded automatically
 
@@ -49,11 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.2] — 2026-04-12 — Path Parameters
 
 ### Added
-- Path parameter extraction: `/users/:id` extracts `id` into `PathParams`
+- Path parameter extraction: `/users/{id}` extracts `id` into `PathParams`
 - `PathParams::get(key)` — retrieve parameter by name
 - `PathParams::iter()` — iterate over all parameters
 - URL percent-decoding of parameter values
-- Multiple parameters: `/users/:id/posts/:post_id`
+- Multiple parameters: `/users/{id}/posts/{post_id}`
 - `PathParams` inserted into request extensions during dispatch
 
 ---

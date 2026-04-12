@@ -10,7 +10,7 @@
 
 - **Radix Trie Engine**: Zero-allocation route matching via `matchit`
 - **Path Routing**: `Router<S>` with `.route()`, `.nest()`, `.merge()`, `.fallback()`
-- **Dynamic Path Parameters**: Extract `:id` and catch-all `*wildcard` segments seamlessly via `PathParams`
+- **Dynamic Path Parameters**: Extract `{id}` and catch-all `{*wildcard}` segments seamlessly via `PathParams`
 - **Prefix Nesting**: Mount sub-routers easily for scalable architectures
 - **Tower Integration**: Embed raw Tower `Service`s using `.route_service()` and `.nest_service()`
 - **Method Routing**: Custom `MethodFilter` bitflag engine for binding `GET`, `POST`, `DELETE`, etc.
