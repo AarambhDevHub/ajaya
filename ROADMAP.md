@@ -97,12 +97,12 @@
 ### `0.1.0` — Static Router
 **Goal:** Route requests to different handlers based on path.
 
-- [ ] `ajaya-router`: `Router<S>` struct
-- [ ] `.route(path, method_router)` — registers a route
-- [ ] Static path matching: `/`, `/users`, `/users/list`
-- [ ] Internal `HashMap<&str, MethodRouter>` (not trie yet — keep it simple first)
-- [ ] `Router` implements Tower `Service`
-- [ ] Wire `Router` into `ajaya-hyper` serve loop
+- [x] `ajaya-router`: `Router<S>` struct
+- [x] `.route(path, method_router)` — registers a route
+- [x] Static path matching: `/`, `/users`, `/users/list`
+- [x] Internal `HashMap<&str, MethodRouter>` (not trie yet — keep it simple first)
+- [x] `Router` implements Tower `Service`
+- [x] Wire `Router` into `ajaya-hyper` serve loop
 
 **Deliverable:** Multiple routes work. `/users` → one handler, `/posts` → another.
 
@@ -111,11 +111,11 @@
 ### `0.1.1` — Radix Trie Router
 **Goal:** Replace HashMap router with a real radix trie.
 
-- [ ] `ajaya-router/src/trie.rs`: `TrieNode` with prefix, children, handler
-- [ ] `ajaya-router/src/node.rs`: node insert + lookup logic
-- [ ] `ajaya-router/src/params.rs`: `PathParams` — `SmallVec<[(&str, &str); 8]>`
-- [ ] Route conflict detection at startup (panic with clear message)
-- [ ] Benchmark: route lookup must be zero heap allocation
+- [x] `ajaya-router/src/trie.rs`: `TrieNode` with prefix, children, handler
+- [x] `ajaya-router/src/node.rs`: node insert + lookup logic
+- [x] `ajaya-router/src/params.rs`: `PathParams` — `SmallVec<[(&str, &str); 8]>`
+- [x] Route conflict detection at startup (panic with clear message)
+- [x] Benchmark: route lookup must be zero heap allocation
 
 **Deliverable:** 1000 routes registered — lookup still O(log n), zero alloc per request.
 
@@ -124,11 +124,11 @@
 ### `0.1.2` — Path Parameters
 **Goal:** `:param` segments in routes.
 
-- [ ] Parse `:name` segments during route registration
-- [ ] Extract param values during lookup
-- [ ] Store in `PathParams` on request extensions
-- [ ] Support multiple params: `/users/:id/posts/:post_id`
-- [ ] URL decode param values
+- [x] Parse `:name` segments during route registration
+- [x] Extract param values during lookup
+- [x] Store in `PathParams` on request extensions
+- [x] Support multiple params: `/users/:id/posts/:post_id`
+- [x] URL decode param values
 
 **Deliverable:** `/users/42` matches `/users/:id` and extracts `id = "42"`.
 
@@ -137,10 +137,10 @@
 ### `0.1.3` — Wildcard Routes
 **Goal:** `*path` catch-all segments.
 
-- [ ] Parse `*name` wildcard during registration
-- [ ] Wildcard captures remainder of path including slashes
-- [ ] Wildcard has lowest priority (static > param > wildcard)
-- [ ] `/files/*path` matches `/files/a/b/c.txt` → `path = "a/b/c.txt"`
+- [x] Parse `*name` wildcard during registration
+- [x] Wildcard captures remainder of path including slashes
+- [x] Wildcard has lowest priority (static > param > wildcard)
+- [x] `/files/*path` matches `/files/a/b/c.txt` → `path = "a/b/c.txt"`
 
 **Deliverable:** Wildcard routes work, priority order correct.
 
@@ -149,10 +149,10 @@
 ### `0.1.4` — Nested Routers
 **Goal:** Compose routers with path prefixes.
 
-- [ ] `Router::nest(prefix, sub_router)` — mounts sub-router under prefix
-- [ ] Path params in prefix work: `.nest("/users/:id", user_router)`
-- [ ] `OriginalUri` extension preserved after nesting
-- [ ] Nested routers inherit parent layers
+- [x] `Router::nest(prefix, sub_router)` — mounts sub-router under prefix
+- [x] Path params in prefix work: `.nest("/users/:id", user_router)`
+- [x] `OriginalUri` extension preserved after nesting
+- [x] Nested routers inherit parent layers
 
 **Deliverable:** API versioning via `.nest("/api/v1", v1_router)`.
 
@@ -161,10 +161,10 @@
 ### `0.1.5` — Router Merge & Fallback
 **Goal:** Combine multiple routers, handle 404s.
 
-- [ ] `Router::merge(other)` — union of routes (panic on conflict)
-- [ ] `Router::fallback(handler)` — custom 404 handler
-- [ ] `Router::fallback_service(service)` — fallback to Tower service
-- [ ] Default fallback: `404 Not Found` plain text response
+- [x] `Router::merge(other)` — union of routes (panic on conflict)
+- [x] `Router::fallback(handler)` — custom 404 handler
+- [x] `Router::fallback_service(service)` — fallback to Tower service
+- [x] Default fallback: `404 Not Found` plain text response
 
 **Deliverable:** Split router definitions across files, merge at startup.
 
@@ -173,9 +173,9 @@
 ### `0.1.6` — Tower Service Nesting
 **Goal:** Mount any Tower service inside the router.
 
-- [ ] `Router::nest_service(path, service)` — mounts raw service
-- [ ] `Router::route_service(path, service)` — like route but for services
-- [ ] Proper request forwarding (strip prefix before passing to nested service)
+- [x] `Router::nest_service(path, service)` — mounts raw service via wildcard
+- [x] `Router::route_service(path, service)` — like route but for services
+- [x] `ServiceHandler<T>` adapter wrapping Tower Service → Handler
 
 **Deliverable:** Mount a separate Tonic gRPC service on a sub-path.
 

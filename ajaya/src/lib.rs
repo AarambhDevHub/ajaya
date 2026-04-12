@@ -6,19 +6,21 @@
 //! ## Quick Start
 //!
 //! ```rust,ignore
-//! use ajaya::{serve, get};
+//! use ajaya::{Router, get, serve_app};
 //!
-//! async fn hello() -> &'static str {
-//!     "Hello from Ajaya!"
-//! }
+//! async fn home() -> &'static str { "Hello from Ajaya!" }
+//! async fn about() -> &'static str { "About Ajaya" }
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     serve("0.0.0.0:8080", hello).await.unwrap();
+//!     let app = Router::new()
+//!         .route("/", get(home))
+//!         .route("/about", get(about));
+//!     serve_app("0.0.0.0:8080", app).await.unwrap();
 //! }
 //! ```
 //!
-//! ## Method Routing
+//! ## Method Routing (single path)
 //!
 //! ```rust,ignore
 //! use ajaya::{get, post, serve_router};
@@ -36,25 +38,13 @@
 //! ## Error Handling
 //!
 //! ```rust,ignore
-//! use ajaya::{get, serve_router, Json, Error};
+//! use ajaya::{Router, get, serve_app, Json, Error};
 //!
 //! async fn handler() -> Result<Json<serde_json::Value>, Error> {
 //!     let data = serde_json::json!({ "name": "Ajaya" });
 //!     Ok(Json(data))
 //! }
 //! ```
-//!
-//! ## Feature Highlights
-//!
-//! - **Type-safe handlers** — any async fn → handler (v0.0.3+)
-//! - **Method dispatch** — `get()`, `post()`, `put()`, `delete()` (v0.0.4+)
-//! - **Error handling** — `Result<T, E>` in handlers with `?` (v0.0.5+)
-//! - **JSON responses** — `Json<T>` for automatic serialization (v0.0.5+)
-//! - **Zero-cost routing** via radix trie (coming in v0.1.x)
-//! - **Type-safe extractors** for path, query, JSON, form (coming in v0.2.x)
-//! - **Tower-compatible middleware** (coming in v0.4.x)
-//! - **WebSocket & SSE** support (coming in v0.5.x)
-//! - **Production-grade TLS** via rustls (coming in v0.6.x)
 
 // Re-export core types
 pub use ajaya_core::Body;
@@ -71,8 +61,10 @@ pub use ajaya_core::ResponseBuilder;
 
 // Re-export router types
 pub use ajaya_router::MethodRouter;
+pub use ajaya_router::PathParams;
+pub use ajaya_router::Router;
 pub use ajaya_router::{any, delete, get, head, on, options, patch, post, put, trace_method};
 
 // Re-export server functionality
 pub use ajaya_hyper::Server;
-pub use ajaya_hyper::{serve, serve_router};
+pub use ajaya_hyper::{serve, serve_app, serve_router};

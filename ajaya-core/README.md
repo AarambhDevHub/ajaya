@@ -22,7 +22,7 @@ This crate provides the foundational abstractions that all other Ajaya crates bu
 
 ## Status
 
-**v0.0.5** — Core implementations are complete. The foundational handler patterns, response building (Json/Html), and type-erased handlers are ready.
+**v0.1.6** — Core implementations are integrated and stable against the v0.1.x routing system.
 
 ## License
 

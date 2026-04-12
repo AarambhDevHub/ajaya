@@ -9,6 +9,7 @@ use std::sync::Arc;
 use ajaya_core::Body;
 use ajaya_core::handler::Handler;
 use ajaya_router::MethodRouter;
+use ajaya_router::Router;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -113,6 +114,61 @@ impl Server {
     pub async fn serve_method_router(
         self,
         router: MethodRouter,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let router = Arc::new(router);
+
+        loop {
+            let (stream, peer_addr) = self.listener.accept().await?;
+            let io = TokioIo::new(stream);
+            let router = router.clone();
+
+            tracing::debug!("Accepted connection from {}", peer_addr);
+
+            tokio::task::spawn(async move {
+                let router = router.clone();
+                let service = service_fn(move |req: hyper::Request<Incoming>| {
+                    let router = router.clone();
+                    async move {
+                        let ajaya_req = ajaya_core::Request::from_hyper(req);
+                        let response = router.call(ajaya_req, ()).await;
+                        Ok::<http::Response<Body>, hyper::Error>(response)
+                    }
+                });
+
+                if let Err(err) = Builder::new(TokioExecutor::new())
+                    .serve_connection(io, service)
+                    .await
+                {
+                    tracing::error!("Connection error: {}", err);
+                }
+            });
+        }
+    }
+
+    /// Start serving HTTP requests using a [`Router`].
+    ///
+    /// The `Router` dispatches requests based on path and HTTP method.
+    /// Returns `404 Not Found` for unmatched paths and `405 Method Not Allowed`
+    /// for unmatched methods.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use ajaya_router::{Router, get, post};
+    ///
+    /// async fn home() -> &'static str { "Home" }
+    /// async fn users() -> &'static str { "Users" }
+    ///
+    /// let app = Router::new()
+    ///     .route("/", get(home))
+    ///     .route("/users", get(users));
+    ///
+    /// let server = Server::bind("0.0.0.0:8080").await?;
+    /// server.serve_app(app).await?;
+    /// ```
+    pub async fn serve_app(
+        self,
+        router: Router,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let router = Arc::new(router);
 

@@ -11,13 +11,13 @@ This crate provides the TCP listener and HTTP connection handling powered by Tok
 ## Usage
 
 ```rust
-use ajaya_hyper::serve_router;
-use ajaya_router::get;
+use ajaya_hyper::serve_app;
+use ajaya_router::{Router, get};
 
 #[tokio::main]
 async fn main() {
-    let router = get(|| async { "Hello World" });
-    serve_router("0.0.0.0:8080", router).await.unwrap();
+    let app = Router::new().route("/", get(|| async { "Hello World" }));
+    serve_app("0.0.0.0:8080", app).await.unwrap();
 }
 ```
 
@@ -28,7 +28,8 @@ async fn main() {
 | `Server::bind(addr)` | Bind a TCP listener to the given address |
 | `Server::serve(handler)` | Start serving single handler on all connections |
 | `Server::serve_method_router(router)` | Start serving HTTP method-matched routing |
-| `serve_router(addr, router)` | Convenience one-liner for routing |
+| `Server::serve_app(router)` | Start serving full path-based routing |
+| `serve_app(addr, router)` | Convenience one-liner for path routing |
 
 ## Features
 

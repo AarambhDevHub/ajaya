@@ -17,7 +17,7 @@
 
 **Ajaya** (अजय, *"The Unconquerable"*) is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**. It aims to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> 🔱 **v0.0.5 — Foundation Complete.** Core types, handler trait, method dispatch, and error handling are implemented. Write async handlers, dispatch by HTTP method, return JSON responses, and propagate errors with `?`. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> 🔱 **v0.1.6 — Routing System Complete.** Ajaya now features a lightning-fast matchit radix trie router. Write async handlers, extract path variables, nest routers, compose services, and safely propagate errors. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -35,46 +35,55 @@ cargo run -p ajaya
 Then in another terminal:
 
 ```bash
-curl http://localhost:8080
-# => {"status":"healthy","framework":"Ajaya","version":"0.0.5"}
+curl http://localhost:8080/
+# => {"status":"healthy","framework":"Ajaya","version":"0.1.x"}
 
-curl -X POST http://localhost:8080
-# => {"status":"created","id":42}
+curl http://localhost:8080/users/42
+# => {"id":"42","name":"User from path param"}
 
-curl -X DELETE http://localhost:8080
-# => 405 Method Not Allowed
+curl http://localhost:8080/not-a-route
+# => 404 Not Found
 ```
 
 ---
 
-## Features (v0.0.5)
+## Features (v0.1.6)
 
-### ✅ Handler System
+### ✅ Powerful Routing System
 
-Any async function that returns `impl IntoResponse` works as a handler:
+Zero-allocation request matching, dynamic path parameters, and catch-all wildcards.
 
 ```rust
-use ajaya::{get, serve_router, Json, Error};
+use ajaya::{Router, get, serve_app, Json, PathParams, Request};
 use http::StatusCode;
 
-// JSON response
-async fn health() -> Result<Json<serde_json::Value>, Error> {
-    Ok(Json(serde_json::json!({
-        "status": "healthy",
-        "version": "0.0.5"
-    })))
-}
-
-// Status code + body
-async fn create() -> (StatusCode, Json<serde_json::Value>) {
-    (StatusCode::CREATED, Json(serde_json::json!({ "id": 42 })))
+async fn user(req: Request) -> Json<serde_json::Value> {
+    let id = req.extension::<PathParams>().and_then(|p| p.get("id")).unwrap_or("0");
+    Json(serde_json::json!({ "user_id": id }))
 }
 
 #[tokio::main]
 async fn main() {
-    let router = get(health).post(create);
-    serve_router("0.0.0.0:8080", router).await.unwrap();
+    let app = Router::new()
+        .route("/", get(|| async { "Home" }))
+        .route("/users/:id", get(user))
+        .route("/files/*path", get(|| async { "File content" }));
+
+    serve_app("0.0.0.0:8080", app).await.unwrap();
 }
+```
+
+### ✅ Router Composition
+
+Seamlessly nest routers underneath prefixes or merge them flatly:
+
+```rust
+let api = Router::new().route("/users", get(list_users));
+let admin = Router::new().route("/dashboard", get(dashboard));
+
+let app = Router::new()
+    .nest("/api/v1", api)
+    .merge(admin);
 ```
 
 ### ✅ Response Types
@@ -91,26 +100,17 @@ async fn main() {
 
 ### ✅ Method Dispatch
 
-```rust
-use ajaya::{get, delete, patch};
+Bind different handlers to specific HTTP methods securely. Unmatched methods automatically return **405 Method Not Allowed** with an accurate `Allow` header.
 
+```rust
 let router = get(get_handler)
     .post(create_handler)
-    .put(update_handler)
-    .delete(delete_handler)
-    .patch(patch_handler);
+    .delete(delete_handler);
 ```
-
-Unmatched methods return **405 Method Not Allowed** with an `Allow` header.
 
 ### ✅ Error Handling
 
-Handlers can return `Result<T, Error>` and use `?` for error propagation.
-Errors produce JSON responses — internal details are never leaked:
-
-```json
-{"error": "Not Found", "code": 404}
-```
+Handlers can return `Result<T, Error>` and use `?` for error propagation. Errors produce secure JSON responses — internal details are never leaked.
 
 ---
 
@@ -141,8 +141,8 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | Version | Focus | Status |
 |---------|-------|--------|
 | **0.0.x** | Foundation & Core | ✅ Complete |
-| 0.1.x | Routing System | 🚧 Next Up |
-| 0.2.x | Extractors | ⏳ Planned |
+| **0.1.x** | Routing System | ✅ Complete |
+| 0.2.x | Extractors | 🚧 Next Up |
 | 0.3.x | Responses & Error Handling | ⏳ Planned |
 | 0.4.x | Middleware | ⏳ Planned |
 | 0.5.x | WebSocket, SSE, Multipart | ⏳ Planned |
