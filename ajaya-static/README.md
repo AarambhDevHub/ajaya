@@ -21,7 +21,7 @@ This crate will provide efficient file serving with caching and compression supp
 
 ## Status
 
-**v0.0.1** — Stub. Implementation coming in v0.6.x.
+**v0.0.5** — Stub. Implementation coming in v0.6.x.
 
 ## License
 

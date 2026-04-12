@@ -9,3 +9,10 @@ rust-version.workspace = true
 description = "Radix trie router for the Ajaya web framework"
 
 [dependencies]
+ajaya-core     = { workspace = true }
+http           = { workspace = true }
+bytes          = { workspace = true }
+http-body      = { workspace = true }
+http-body-util = { workspace = true }
+futures-util   = { workspace = true }
+tracing        = { workspace = true }

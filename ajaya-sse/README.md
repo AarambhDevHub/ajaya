@@ -17,7 +17,7 @@ This crate will provide one-directional event streaming to clients.
 
 ## Status
 
-**v0.0.1** — Stub. Implementation coming in v0.5.x.
+**v0.0.5** — Stub. Implementation coming in v0.5.x.
 
 ## License
 

@@ -19,7 +19,7 @@ This crate will provide TLS termination using rustls and native-tls backends.
 
 ## Status
 
-**v0.0.1** — Stub. Implementation coming in v0.6.x.
+**v0.0.5** — Stub. Implementation coming in v0.6.x.
 
 ## License
 

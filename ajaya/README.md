@@ -12,15 +12,22 @@ This is the facade crate that re-exports everything you need from the Ajaya ecos
 
 ```toml
 [dependencies]
-ajaya = "0.0.1"
+ajaya = "0.0.5"
 ```
 
 ```rust
-use ajaya::serve;
+use ajaya::{get, serve_router, Json};
+
+async fn hello() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "message": "Hello from Ajaya!"
+    }))
+}
 
 #[tokio::main]
 async fn main() {
-    serve("0.0.0.0:8080").await.unwrap();
+    let router = get(hello);
+    serve_router("0.0.0.0:8080", router).await.unwrap();
 }
 ```
 
@@ -30,8 +37,9 @@ This crate re-exports from:
 
 | Crate | What |
 |-------|------|
-| `ajaya-core` | `Request`, `Response`, `Body`, `Error` |
-| `ajaya-hyper` | `Server`, `serve()` |
+| `ajaya-core` | `Request`, `Response`, `Body`, `Handler`, `IntoResponse`, `Json`, `Html`, `Error`, `Redirect` |
+| `ajaya-hyper` | `Server`, `serve()`, `serve_router()` |
+| `ajaya-router`| `MethodRouter`, `get()`, `post()`, `put()`, `delete()`, `patch()`, etc. |
 
 More re-exports will be added as the framework grows.
 

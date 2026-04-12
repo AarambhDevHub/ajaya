@@ -9,8 +9,12 @@ rust-version.workspace = true
 description = "Ajaya (अजय) — The Unconquerable Rust Web Framework"
 
 [dependencies]
-ajaya-core  = { workspace = true }
-ajaya-hyper = { workspace = true }
-tokio       = { workspace = true }
-tracing     = { workspace = true }
+ajaya-core   = { workspace = true }
+ajaya-hyper  = { workspace = true }
+ajaya-router = { workspace = true }
+tokio        = { workspace = true }
+http         = { workspace = true }
+serde_json   = { workspace = true }
+tracing      = { workspace = true }
 tracing-subscriber = { workspace = true }
+
