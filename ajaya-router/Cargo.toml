@@ -16,3 +16,5 @@ http-body      = { workspace = true }
 http-body-util = { workspace = true }
 futures-util   = { workspace = true }
 tracing        = { workspace = true }
+matchit        = { workspace = true }
+tower-service  = { workspace = true }

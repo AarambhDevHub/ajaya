@@ -4,6 +4,7 @@
 
 use ajaya_core::handler::Handler;
 use ajaya_router::MethodRouter;
+use ajaya_router::Router;
 
 use crate::Server;
 
@@ -52,4 +53,30 @@ pub async fn serve_router(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let server = Server::bind(addr).await?;
     server.serve_method_router(router).await
+}
+
+/// Start the Ajaya HTTP server on the given address with a [`Router`].
+///
+/// Dispatches requests based on path and HTTP method. Returns `404 Not Found`
+/// for unmatched paths and `405 Method Not Allowed` for unmatched methods.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use ajaya_router::{Router, get};
+///
+/// async fn home() -> &'static str { "Home" }
+/// async fn about() -> &'static str { "About" }
+///
+/// let app = Router::new()
+///     .route("/", get(home))
+///     .route("/about", get(about));
+/// ajaya_hyper::serve_app("0.0.0.0:8080", app).await.unwrap();
+/// ```
+pub async fn serve_app(
+    addr: &str,
+    router: Router,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let server = Server::bind(addr).await?;
+    server.serve_app(router).await
 }

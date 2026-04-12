@@ -9,6 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.6] — 2026-04-12 — Tower Service Nesting
+
+### Added
+- `Router::route_service(path, service)` — mount Tower services at exact paths
+- `Router::nest_service(prefix, service)` — mount Tower services under path prefixes
+- `ServiceHandler<T>` adapter wrapping Tower `Service` into Ajaya `Handler`
+- `tower-service` dependency added to `ajaya-router`
+
+---
+
+## [0.1.5] — 2026-04-12 — Router Merge & Fallback
+
+### Added
+- `Router::merge(other)` — combine routes from two routers (panic on conflict)
+- `Router::fallback(handler)` — custom fallback handler for unmatched paths
+- Default 404 plain text response for unmatched paths
+
+---
+
+## [0.1.4] — 2026-04-12 — Nested Routers
+
+### Added
+- `Router::nest(prefix, sub_router)` — compose routers under path prefixes
+- Flatten strategy: nested routes inserted into parent trie at registration time
+- Path parameters in prefixes work: `.nest("/users/:id", user_router)`
+
+---
+
+## [0.1.3] — 2026-04-12 — Wildcard Routes
+
+### Added
+- Wildcard catch-all segments: `/files/*path`
+- Priority ordering: static > param > wildcard (native matchit behavior)
+- Wildcard values URL-decoded automatically
+
+---
+
+## [0.1.2] — 2026-04-12 — Path Parameters
+
+### Added
+- Path parameter extraction: `/users/:id` extracts `id` into `PathParams`
+- `PathParams::get(key)` — retrieve parameter by name
+- `PathParams::iter()` — iterate over all parameters
+- URL percent-decoding of parameter values
+- Multiple parameters: `/users/:id/posts/:post_id`
+- `PathParams` inserted into request extensions during dispatch
+
+---
+
+## [0.1.1] — 2026-04-12 — Radix Trie Router
+
+### Changed
+- **BREAKING:** Internal router storage switched from `HashMap` to `matchit` radix trie
+- Zero-allocation route lookup per request
+- Route conflict detection at startup (panics with clear message)
+
+### Added
+- `matchit` dependency for radix trie routing
+- `PathParams` struct in `ajaya-router::params`
+
+---
+
+## [0.1.0] — 2026-04-12 — Static Router
+
+### Added
+- `Router<S>` — path-based HTTP router with `.route(path, method_router)` API
+- `serve_app(addr, router)` convenience function in `ajaya-hyper`
+- `Server::serve_app(router)` method for Router-based serving
+- Path normalization (trailing slash stripping)
+- Re-exported `Router` and `serve_app` from the `ajaya` facade crate
+
+---
+
 ## [0.0.5] — 2026-04-12
 
 ### Added

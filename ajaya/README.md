@@ -12,11 +12,13 @@ This is the facade crate that re-exports everything you need from the Ajaya ecos
 
 ```toml
 [dependencies]
-ajaya = "0.0.5"
+ajaya = "0.1.6"
+tokio = { version = "1", features = ["full"] }
+serde_json = "1.0"
 ```
 
 ```rust
-use ajaya::{get, serve_router, Json};
+use ajaya::{Router, get, serve_app, Json, PathParams, Request};
 
 async fn hello() -> Json<serde_json::Value> {
     Json(serde_json::json!({
@@ -24,10 +26,18 @@ async fn hello() -> Json<serde_json::Value> {
     }))
 }
 
+async fn user(req: Request) -> String {
+    let id = req.extension::<PathParams>().and_then(|p| p.get("id")).unwrap_or("unknown");
+    format!("User ID: {}", id)
+}
+
 #[tokio::main]
 async fn main() {
-    let router = get(hello);
-    serve_router("0.0.0.0:8080", router).await.unwrap();
+    let app = Router::new()
+        .route("/", get(hello))
+        .route("/users/:id", get(user));
+        
+    serve_app("0.0.0.0:8080", app).await.unwrap();
 }
 ```
 
@@ -38,8 +48,8 @@ This crate re-exports from:
 | Crate | What |
 |-------|------|
 | `ajaya-core` | `Request`, `Response`, `Body`, `Handler`, `IntoResponse`, `Json`, `Html`, `Error`, `Redirect` |
-| `ajaya-hyper` | `Server`, `serve()`, `serve_router()` |
-| `ajaya-router`| `MethodRouter`, `get()`, `post()`, `put()`, `delete()`, `patch()`, etc. |
+| `ajaya-hyper` | `Server`, `serve()`, `serve_router()`, `serve_app()` |
+| `ajaya-router`| `Router`, `MethodRouter`, `PathParams`, `get()`, `post()`, etc. |
 
 More re-exports will be added as the framework grows.
 

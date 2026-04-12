@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya"
-version = "0.0.5"
+version = "0.1.6"
 dependencies = [
  "ajaya-core",
  "ajaya-hyper",
@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya-core"
-version = "0.0.5"
+version = "0.1.6"
 dependencies = [
  "bytes",
  "futures-util",
@@ -44,11 +44,11 @@ dependencies = [
 
 [[package]]
 name = "ajaya-extract"
-version = "0.0.5"
+version = "0.1.6"
 
 [[package]]
 name = "ajaya-hyper"
-version = "0.0.5"
+version = "0.1.6"
 dependencies = [
  "ajaya-core",
  "ajaya-router",
@@ -64,15 +64,15 @@ dependencies = [
 
 [[package]]
 name = "ajaya-macros"
-version = "0.0.5"
+version = "0.1.6"
 
 [[package]]
 name = "ajaya-middleware"
-version = "0.0.5"
+version = "0.1.6"
 
 [[package]]
 name = "ajaya-router"
-version = "0.0.5"
+version = "0.1.6"
 dependencies = [
  "ajaya-core",
  "bytes",
@@ -80,28 +80,30 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "matchit",
+ "tower-service",
  "tracing",
 ]
 
 [[package]]
 name = "ajaya-sse"
-version = "0.0.5"
+version = "0.1.6"
 
 [[package]]
 name = "ajaya-static"
-version = "0.0.5"
+version = "0.1.6"
 
 [[package]]
 name = "ajaya-test"
-version = "0.0.5"
+version = "0.1.6"
 
 [[package]]
 name = "ajaya-tls"
-version = "0.0.5"
+version = "0.1.6"
 
 [[package]]
 name = "ajaya-ws"
-version = "0.0.5"
+version = "0.1.6"
 
 [[package]]
 name = "atomic-waker"
@@ -356,6 +358,12 @@ checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
 dependencies = [
  "regex-automata",
 ]
+
+[[package]]
+name = "matchit"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f926ade0c4e170215ae43342bf13b9310a437609c81f29f86c5df6657582ef9"
 
 [[package]]
 name = "memchr"
@@ -638,6 +646,12 @@ dependencies = [
  "pin-project-lite",
  "tokio",
 ]
+
+[[package]]
+name = "tower-service"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "tracing"

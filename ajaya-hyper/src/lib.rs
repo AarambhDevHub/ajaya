@@ -25,5 +25,5 @@
 pub mod serve;
 pub mod server;
 
-pub use serve::{serve, serve_router};
+pub use serve::{serve, serve_app, serve_router};
 pub use server::Server;
