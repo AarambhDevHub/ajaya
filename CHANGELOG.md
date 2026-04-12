@@ -9,6 +9,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.0.5] — 2026-04-12
+
+### Added
+
+- **Error Foundation** — Complete error handling system
+  - `Error` type now implements `IntoResponse` — produces JSON error bodies: `{"error": "message", "code": 404}`
+  - `Result<T: IntoResponse, E: IntoResponse>` implements `IntoResponse` — enables `?` propagation in handlers
+  - `From` impls for `std::io::Error`, `serde_json::Error`, `http::Error`, `String`, `&str`
+  - `Error::from_status(StatusCode)` convenience constructor
+  - Internal error details are never leaked to clients — only public messages are exposed
+- **`Json<T>` response type** — Serialize any `T: Serialize` as JSON with `Content-Type: application/json`
+- **`Html<T>` response type** — Return HTML with `Content-Type: text/html; charset=utf-8`
+
+---
+
+## [0.0.4] — 2026-04-12
+
+### Added
+
+- **Method Dispatch** — Differentiate HTTP methods at the server level
+  - `MethodFilter` — bitflag enum for matching HTTP methods (`GET`, `POST`, `PUT`, `DELETE`, `PATCH`, `HEAD`, `OPTIONS`, `TRACE`, `ANY`)
+  - `MethodRouter<S>` — stores one handler per HTTP method with dispatch
+  - Top-level constructor functions: `get()`, `post()`, `put()`, `delete()`, `patch()`, `head()`, `options()`, `trace_method()`, `any()`, `on()`
+  - Method chaining: `get(handler).post(handler).delete(handler)`
+  - Returns `405 Method Not Allowed` with `Allow` header for unmatched methods
+- **`serve_router(addr, router)`** — serve a `MethodRouter` directly
+- **`Server::serve_method_router(router)`** — lower-level method router serving
+
+---
+
+## [0.0.3] — 2026-04-12
+
+### Added
+
+- **Handler Trait** — Core request handling abstraction
+  - `Handler<T, S>` trait definition with `call(self, req, state) -> Future<Output = Response>`
+  - Blanket impl for `async fn() -> impl IntoResponse` (zero-argument handlers)
+  - Blanket impl for `async fn(Request) -> impl IntoResponse` (request handlers)
+  - Type-erased handler storage via `ErasedHandler` trait for dynamic dispatch
+- **`IntoResponse` trait** — Full implementations for common types:
+  - `Response` (identity), `StatusCode` (empty body), `String`, `&'static str` (text/plain)
+  - `Bytes`, `Vec<u8>` (application/octet-stream), `()` (200 OK empty)
+  - `(StatusCode, T)` tuple for custom status codes
+  - `(StatusCode, [(K, V); N], T)` tuple for status + headers + body
+  - `([(K, V); N], T)` tuple for headers + body
+- **Handler-based `serve()`** — `serve(addr, handler)` now accepts any `Handler<T>`
+- **Updated `ajaya` facade** — Re-exports `Handler`, `IntoResponse`, `ResponseBuilder`, `Redirect`
+
+### Changed
+
+- `Server::serve()` now requires a handler argument (breaking change from v0.0.1)
+- `serve()` now takes two arguments: `serve(addr, handler)` instead of `serve(addr)`
+
+---
+
+## [0.0.2] — 2026-04-12
+
+### Added
+
+- **Real `Body` type** — Replaced `Full<Bytes>` type alias with a proper struct
+  - `Body` wraps a type-erased `Pin<Box<dyn http_body::Body>>` for any body source
+  - `Body::empty()` — zero-byte body
+  - `Body::from_bytes(Bytes)` — body from raw bytes
+  - `Body::to_bytes()` — async collect to `Bytes`
+  - `Body::to_string()` — async collect to UTF-8 `String`
+  - `From` impls: `String`, `&'static str`, `Bytes`, `Vec<u8>`, `Full<Bytes>`, `()`
+  - Implements `http_body::Body` for direct Hyper integration
+- **`ResponseBuilder`** — Fluent API for response construction
+  - `.status()`, `.header()`, `.body()`, `.json()`, `.html()`, `.text()`, `.empty()`
+- **`Redirect`** — convenience redirect responses: `Redirect::to()`, `::permanent()`, `::temporary()`
+- **Enhanced `Request<B>`**
+  - `Request::from_hyper()` — convert `hyper::Request<Incoming>` to Ajaya's `Request<Body>`
+  - `into_parts()` — decompose into `(Parts, Body)`
+  - `version()` — HTTP version accessor
+  - `extension::<T>()` — typed extension getter
+  - `headers_mut()` — mutable header access
+  - `map_body()` — transform body type
+- **`IntoResponse` trait** — Stub definition (implementations in v0.0.3)
+
+### Changed
+
+- `ajaya-hyper` server now converts incoming Hyper requests to `ajaya_core::Request` and returns `Response<Body>` using `ResponseBuilder`
+
+---
+
 ## [0.0.1] — 2026-04-11
 
 ### Added
@@ -48,5 +133,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.5...HEAD
+[0.0.5]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.2...v0.0.3
+[0.0.2]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.1...v0.0.2
 [0.0.1]: https://github.com/AarambhDevHub/ajaya/releases/tag/v0.0.1

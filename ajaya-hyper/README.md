@@ -11,11 +11,13 @@ This crate provides the TCP listener and HTTP connection handling powered by Tok
 ## Usage
 
 ```rust
-use ajaya_hyper::serve;
+use ajaya_hyper::serve_router;
+use ajaya_router::get;
 
 #[tokio::main]
 async fn main() {
-    serve("0.0.0.0:8080").await.unwrap();
+    let router = get(|| async { "Hello World" });
+    serve_router("0.0.0.0:8080", router).await.unwrap();
 }
 ```
 
@@ -24,11 +26,13 @@ async fn main() {
 | Item | Description |
 |------|-------------|
 | `Server::bind(addr)` | Bind a TCP listener to the given address |
-| `Server::serve()` | Start accepting and serving HTTP connections |
-| `serve(addr)` | Convenience one-liner combining bind + serve |
+| `Server::serve(handler)` | Start serving single handler on all connections |
+| `Server::serve_method_router(router)` | Start serving HTTP method-matched routing |
+| `serve_router(addr, router)` | Convenience one-liner for routing |
 
 ## Features
 
+- Automatic conversion from raw hyper `Incoming` payloads into Ajaya `Request<Body>`.
 - Hyper 1.x with `hyper-util` auto connection builder
 - Per-connection Tokio task spawning
 - HTTP/1.1 and HTTP/2 support via ALPN

@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.0.1-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.0.5-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -17,7 +17,7 @@
 
 **Ajaya** (अजय, *"The Unconquerable"*) is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**. It aims to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> ⚠️ **v0.0.1 — Workspace Bootstrap.** This is the very first milestone. The framework compiles and runs a basic HTTP server. All advanced features are coming in subsequent versions — follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> 🔱 **v0.0.5 — Foundation Complete.** Core types, handler trait, method dispatch, and error handling are implemented. Write async handlers, dispatch by HTTP method, return JSON responses, and propagate errors with `?`. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -36,7 +36,80 @@ Then in another terminal:
 
 ```bash
 curl http://localhost:8080
-# => Hello from Ajaya
+# => {"status":"healthy","framework":"Ajaya","version":"0.0.5"}
+
+curl -X POST http://localhost:8080
+# => {"status":"created","id":42}
+
+curl -X DELETE http://localhost:8080
+# => 405 Method Not Allowed
+```
+
+---
+
+## Features (v0.0.5)
+
+### ✅ Handler System
+
+Any async function that returns `impl IntoResponse` works as a handler:
+
+```rust
+use ajaya::{get, serve_router, Json, Error};
+use http::StatusCode;
+
+// JSON response
+async fn health() -> Result<Json<serde_json::Value>, Error> {
+    Ok(Json(serde_json::json!({
+        "status": "healthy",
+        "version": "0.0.5"
+    })))
+}
+
+// Status code + body
+async fn create() -> (StatusCode, Json<serde_json::Value>) {
+    (StatusCode::CREATED, Json(serde_json::json!({ "id": 42 })))
+}
+
+#[tokio::main]
+async fn main() {
+    let router = get(health).post(create);
+    serve_router("0.0.0.0:8080", router).await.unwrap();
+}
+```
+
+### ✅ Response Types
+
+| Return Type | Content-Type | Status |
+|---|---|---|
+| `&'static str` / `String` | `text/plain` | 200 |
+| `Json<T: Serialize>` | `application/json` | 200 |
+| `Html<T: Into<String>>` | `text/html` | 200 |
+| `StatusCode` | — (empty body) | Any |
+| `(StatusCode, T)` | Inherits from `T` | Custom |
+| `Result<T, E>` | Inherits from `Ok`/`Err` | Auto |
+| `Bytes` / `Vec<u8>` | `application/octet-stream` | 200 |
+
+### ✅ Method Dispatch
+
+```rust
+use ajaya::{get, delete, patch};
+
+let router = get(get_handler)
+    .post(create_handler)
+    .put(update_handler)
+    .delete(delete_handler)
+    .patch(patch_handler);
+```
+
+Unmatched methods return **405 Method Not Allowed** with an `Allow` header.
+
+### ✅ Error Handling
+
+Handlers can return `Result<T, Error>` and use `?` for error propagation.
+Errors produce JSON responses — internal details are never leaked:
+
+```json
+{"error": "Not Found", "code": 404}
 ```
 
 ---
@@ -46,8 +119,8 @@ curl http://localhost:8080
 ```
 ajaya/
 ├── ajaya/              # Facade crate (re-exports everything)
-├── ajaya-core/         # Core traits: Request, Response, Body, Error
-├── ajaya-router/       # Radix trie router (coming in v0.1.x)
+├── ajaya-core/         # Core: Request, Response, Body, Handler, IntoResponse, Error
+├── ajaya-router/       # MethodRouter — HTTP method dispatch
 ├── ajaya-hyper/        # Hyper 1.x server integration
 ├── ajaya-extract/      # Extractors: Path, Query, Json, Form (coming in v0.2.x)
 ├── ajaya-middleware/   # CORS, compression, timeout, etc. (coming in v0.4.x)
@@ -67,8 +140,8 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| **0.0.x** | Foundation & Core | 🚧 In Progress |
-| 0.1.x | Routing System | ⏳ Planned |
+| **0.0.x** | Foundation & Core | ✅ Complete |
+| 0.1.x | Routing System | 🚧 Next Up |
 | 0.2.x | Extractors | ⏳ Planned |
 | 0.3.x | Responses & Error Handling | ⏳ Planned |
 | 0.4.x | Middleware | ⏳ Planned |
@@ -101,7 +174,7 @@ Benchmarks will be tracked in `examples/benchmarks/` starting from `v0.9.x`.
 
 ## Contributing
 
-Ajaya is being built in public from `0.0.1`. Contributions are welcome at every stage.
+Ajaya is being built in public from `0.0.5`. Contributions are welcome at every stage.
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for the full guide — setup, coding standards, commit format, and PR process.
 

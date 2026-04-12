@@ -22,7 +22,7 @@ This crate will provide type-safe extraction of data from HTTP requests.
 
 ## Status
 
-**v0.0.1** — Stub. Implementation coming in v0.2.x.
+**v0.0.5** — Stub. Implementation coming in v0.2.x.
 
 ## License
 

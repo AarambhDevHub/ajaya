@@ -4,9 +4,11 @@
 //! HTTP responses using Hyper's connection builder.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
-use bytes::Bytes;
-use http_body_util::Full;
+use ajaya_core::Body;
+use ajaya_core::handler::Handler;
+use ajaya_router::MethodRouter;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -23,10 +25,12 @@ use tokio::net::TcpListener;
 /// ```rust,ignore
 /// use ajaya_hyper::Server;
 ///
+/// async fn hello() -> &'static str { "Hello!" }
+///
 /// #[tokio::main]
 /// async fn main() {
 ///     let server = Server::bind("0.0.0.0:8080").await.unwrap();
-///     server.serve().await.unwrap();
+///     server.serve(hello).await.unwrap();
 /// }
 /// ```
 pub struct Server {
@@ -50,30 +54,83 @@ impl Server {
         self.addr
     }
 
-    /// Start serving HTTP requests.
+    /// Start serving HTTP requests using the provided handler.
     ///
-    /// This runs an infinite accept loop, spawning a new Tokio task
-    /// for each incoming connection. Currently responds with
-    /// "Hello from Ajaya" to every request.
-    pub async fn serve(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    /// Any async function that returns `impl IntoResponse` works.
+    pub async fn serve<H, T>(
+        self,
+        handler: H,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    where
+        H: Handler<T> + Clone + Send + Sync + 'static,
+        T: 'static,
+    {
         loop {
             let (stream, peer_addr) = self.listener.accept().await?;
             let io = TokioIo::new(stream);
+            let handler = handler.clone();
 
             tracing::debug!("Accepted connection from {}", peer_addr);
 
             tokio::task::spawn(async move {
-                let service = service_fn(move |_req: hyper::Request<Incoming>| {
-                    let peer = peer_addr;
+                let handler = handler.clone();
+                let service = service_fn(move |req: hyper::Request<Incoming>| {
+                    let handler = handler.clone();
                     async move {
-                        tracing::debug!("Request from {}", peer);
-                        let response = hyper::Response::builder()
-                            .status(200)
-                            .header("content-type", "text/plain; charset=utf-8")
-                            .header("server", "Ajaya/0.0.1")
-                            .body(Full::new(Bytes::from("Hello from Ajaya")))
-                            .unwrap();
-                        Ok::<_, hyper::Error>(response)
+                        let ajaya_req = ajaya_core::Request::from_hyper(req);
+                        let response = handler.call(ajaya_req, ()).await;
+                        Ok::<http::Response<Body>, hyper::Error>(response)
+                    }
+                });
+
+                if let Err(err) = Builder::new(TokioExecutor::new())
+                    .serve_connection(io, service)
+                    .await
+                {
+                    tracing::error!("Connection error: {}", err);
+                }
+            });
+        }
+    }
+
+    /// Start serving HTTP requests using a [`MethodRouter`].
+    ///
+    /// The `MethodRouter` dispatches requests based on the HTTP method.
+    /// Returns `405 Method Not Allowed` for unregistered methods.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use ajaya_router::{get, post};
+    ///
+    /// async fn hello() -> &'static str { "Hello!" }
+    /// async fn create() -> &'static str { "Created!" }
+    ///
+    /// let router = get(hello).post(create);
+    /// let server = Server::bind("0.0.0.0:8080").await?;
+    /// server.serve_method_router(router).await?;
+    /// ```
+    pub async fn serve_method_router(
+        self,
+        router: MethodRouter,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let router = Arc::new(router);
+
+        loop {
+            let (stream, peer_addr) = self.listener.accept().await?;
+            let io = TokioIo::new(stream);
+            let router = router.clone();
+
+            tracing::debug!("Accepted connection from {}", peer_addr);
+
+            tokio::task::spawn(async move {
+                let router = router.clone();
+                let service = service_fn(move |req: hyper::Request<Incoming>| {
+                    let router = router.clone();
+                    async move {
+                        let ajaya_req = ajaya_core::Request::from_hyper(req);
+                        let response = router.call(ajaya_req, ()).await;
+                        Ok::<http::Response<Body>, hyper::Error>(response)
                     }
                 });
 

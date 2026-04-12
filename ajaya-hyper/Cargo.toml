@@ -10,6 +10,7 @@ description = "Hyper server integration for the Ajaya web framework"
 
 [dependencies]
 ajaya-core     = { workspace = true }
+ajaya-router   = { workspace = true }
 tokio          = { workspace = true }
 hyper          = { workspace = true }
 hyper-util     = { workspace = true }
@@ -18,3 +19,4 @@ http-body      = { workspace = true }
 http-body-util = { workspace = true }
 bytes          = { workspace = true }
 tracing        = { workspace = true }
+

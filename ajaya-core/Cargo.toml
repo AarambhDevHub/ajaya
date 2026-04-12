@@ -12,7 +12,11 @@ description = "Core traits and types for the Ajaya web framework"
 http           = { workspace = true }
 http-body      = { workspace = true }
 http-body-util = { workspace = true }
+hyper          = { workspace = true }
 bytes          = { workspace = true }
 thiserror      = { workspace = true }
 pin-project-lite = { workspace = true }
 futures-util   = { workspace = true }
+serde          = { workspace = true }
+serde_json     = { workspace = true }
+mime           = { workspace = true }

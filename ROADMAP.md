@@ -42,12 +42,12 @@
 ### `0.0.2` — Core Types
 **Goal:** Real `Request` and `Response` types replacing raw Hyper types.
 
-- [ ] `ajaya-core`: `Request<B>` wrapper around `http::Request<B>`
-- [ ] `ajaya-core`: `Response<B>` type alias + `ResponseBuilder`
-- [ ] `ajaya-core`: `Body` unified type (wraps `BoxBody`)
-- [ ] `Body::empty()`, `Body::from_bytes()`, `Body::to_bytes()` async
-- [ ] `Extensions` typed map on `Request`
-- [ ] Convert raw Hyper request/response ↔ Ajaya types in `ajaya-hyper`
+- [x] `ajaya-core`: `Request<B>` wrapper around `http::Request<B>`
+- [x] `ajaya-core`: `Response<B>` type alias + `ResponseBuilder`
+- [x] `ajaya-core`: `Body` unified type (wraps `BoxBody`)
+- [x] `Body::empty()`, `Body::from_bytes()`, `Body::to_bytes()` async
+- [x] `Extensions` typed map on `Request`
+- [x] Convert raw Hyper request/response ↔ Ajaya types in `ajaya-hyper`
 
 **Deliverable:** Handlers receive `Request`, return `Response`. Fully typed.
 
@@ -56,11 +56,11 @@
 ### `0.0.3` — Handler Trait
 **Goal:** First version of the `Handler` trait.
 
-- [ ] `ajaya-core`: `Handler<T, S>` trait definition
-- [ ] Blanket impl for `async fn() -> impl IntoResponse` (zero extractors)
-- [ ] Blanket impl for `async fn(Request) -> impl IntoResponse` (raw request)
-- [ ] `IntoResponse` trait + impls for `StatusCode`, `String`, `&str`, `Bytes`, `(StatusCode, String)`
-- [ ] Wire handler into `ajaya-hyper` serve loop
+- [x] `ajaya-core`: `Handler<T, S>` trait definition
+- [x] Blanket impl for `async fn() -> impl IntoResponse` (zero extractors)
+- [x] Blanket impl for `async fn(Request) -> impl IntoResponse` (raw request)
+- [x] `IntoResponse` trait + impls for `StatusCode`, `String`, `&str`, `Bytes`, `(StatusCode, String)`
+- [x] Wire handler into `ajaya-hyper` serve loop
 
 **Deliverable:** Write a bare async fn, pass it to the server, it works.
 
@@ -69,11 +69,11 @@
 ### `0.0.4` — Method Dispatch Skeleton
 **Goal:** Differentiate GET vs POST at the server level.
 
-- [ ] `ajaya-core`: `MethodFilter` bitflag enum
-- [ ] `ajaya-router`: `MethodRouter` struct (stores handlers per HTTP method)
-- [ ] `get()`, `post()`, `put()`, `delete()`, `patch()` constructor functions
-- [ ] Return `405 Method Not Allowed` when method doesn't match
-- [ ] Return `404 Not Found` for unknown paths (hardcoded fallback)
+- [x] `ajaya-core`: `MethodFilter` bitflag enum
+- [x] `ajaya-router`: `MethodRouter` struct (stores handlers per HTTP method)
+- [x] `get()`, `post()`, `put()`, `delete()`, `patch()` constructor functions
+- [x] Return `405 Method Not Allowed` when method doesn't match
+- [x] Return `404 Not Found` for unknown paths (hardcoded fallback)
 
 **Deliverable:** `get(handler)` and `post(handler)` work as distinct routes.
 
@@ -82,11 +82,11 @@
 ### `0.0.5` — Error Foundation
 **Goal:** Proper error type + `?` propagation in handlers.
 
-- [ ] `ajaya-core`: `Error` struct with status + message
-- [ ] `AjayaError` implements `std::error::Error` + `IntoResponse`
-- [ ] `Result<T: IntoResponse, E: IntoResponse>` implements `IntoResponse`
-- [ ] Handlers can return `Result<impl IntoResponse, impl IntoResponse>`
-- [ ] Internal server errors don't leak details in response body
+- [x] `ajaya-core`: `Error` struct with status + message
+- [x] `AjayaError` implements `std::error::Error` + `IntoResponse`
+- [x] `Result<T: IntoResponse, E: IntoResponse>` implements `IntoResponse`
+- [x] Handlers can return `Result<impl IntoResponse, impl IntoResponse>`
+- [x] Internal server errors don't leak details in response body
 
 **Deliverable:** `async fn handler() -> Result<Json<T>, AppError>` compiles and works.
 

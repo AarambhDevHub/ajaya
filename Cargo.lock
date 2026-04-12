@@ -13,10 +13,13 @@ dependencies = [
 
 [[package]]
 name = "ajaya"
-version = "0.0.1"
+version = "0.0.5"
 dependencies = [
  "ajaya-core",
  "ajaya-hyper",
+ "ajaya-router",
+ "http",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -24,26 +27,31 @@ dependencies = [
 
 [[package]]
 name = "ajaya-core"
-version = "0.0.1"
+version = "0.0.5"
 dependencies = [
  "bytes",
  "futures-util",
  "http",
  "http-body",
  "http-body-util",
+ "hyper",
+ "mime",
  "pin-project-lite",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 
 [[package]]
 name = "ajaya-extract"
-version = "0.0.1"
+version = "0.0.5"
 
 [[package]]
 name = "ajaya-hyper"
-version = "0.0.1"
+version = "0.0.5"
 dependencies = [
  "ajaya-core",
+ "ajaya-router",
  "bytes",
  "http",
  "http-body",
@@ -56,35 +64,44 @@ dependencies = [
 
 [[package]]
 name = "ajaya-macros"
-version = "0.0.1"
+version = "0.0.5"
 
 [[package]]
 name = "ajaya-middleware"
-version = "0.0.1"
+version = "0.0.5"
 
 [[package]]
 name = "ajaya-router"
-version = "0.0.1"
+version = "0.0.5"
+dependencies = [
+ "ajaya-core",
+ "bytes",
+ "futures-util",
+ "http",
+ "http-body",
+ "http-body-util",
+ "tracing",
+]
 
 [[package]]
 name = "ajaya-sse"
-version = "0.0.1"
+version = "0.0.5"
 
 [[package]]
 name = "ajaya-static"
-version = "0.0.1"
+version = "0.0.5"
 
 [[package]]
 name = "ajaya-test"
-version = "0.0.1"
+version = "0.0.5"
 
 [[package]]
 name = "ajaya-tls"
-version = "0.0.1"
+version = "0.0.5"
 
 [[package]]
 name = "ajaya-ws"
-version = "0.0.1"
+version = "0.0.5"
 
 [[package]]
 name = "atomic-waker"
@@ -347,6 +364,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
+name = "mime"
+version = "0.3.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
 name = "mio"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -458,6 +481,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

@@ -14,12 +14,15 @@ This crate provides the foundational abstractions that all other Ajaya crates bu
 |------|-------------|
 | `Request<B>` | HTTP request wrapper around `http::Request` with extensions |
 | `Response<B>` | Type alias for `http::Response` with Ajaya's `Body` |
-| `Body` | Unified HTTP body type |
-| `Error` | Framework error with status code and public message |
+| `Body` | Unified HTTP body type with `http_body::Body` support |
+| `Error` | Framework error producing JSON responses securely |
+| `ResponseBuilder` | Ergonomic fluent API for building typed responses |
+| `Handler<T,S>` | Trait defining an async request handler |
+| `IntoResponse` | Conversion trait turning handlers' return types into HTTP Responses |
 
 ## Status
 
-**v0.0.1** — Stub implementations. Full types coming in v0.0.2.
+**v0.0.5** — Core implementations are complete. The foundational handler patterns, response building (Json/Html), and type-erased handlers are ready.
 
 ## License
 

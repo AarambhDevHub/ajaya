@@ -22,7 +22,7 @@ This crate will provide Tower-compatible middleware layers for common web applic
 
 ## Status
 
-**v0.0.1** — Stub. Implementation coming in v0.4.x.
+**v0.0.5** — Stub. Implementation coming in v0.4.x.
 
 ## License
 

@@ -19,7 +19,7 @@ This crate will provide a test client for handler testing without spinning up a 
 
 ## Status
 
-**v0.0.1** — Stub. Implementation coming in v0.7.x.
+**v0.0.5** — Stub. Implementation coming in v0.7.x.
 
 ## License
 

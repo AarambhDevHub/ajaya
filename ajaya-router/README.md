@@ -4,14 +4,18 @@
 [![Docs.rs](https://docs.rs/ajaya-router/badge.svg)](https://docs.rs/ajaya-router)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](../LICENSE-MIT)
 
-**Radix trie router for the Ajaya web framework.**
+**Radix trie router system and HTTP method dispatch for the Ajaya web framework.**
 
-This crate will provide zero-allocation route matching with path parameters and wildcards.
+## Features
+
+- Custom `MethodFilter` bitflag engine
+- `MethodRouter` for binding different handlers to specific HTTP methods (`GET`, `POST`, `DELETE`, etc.)
+- Strict 405 Method Not Allowed handling utilizing the valid `Allow` HTTP header.
+- Dynamic dispatch of type-erased `Handler`s.
 
 ## Planned Features (v0.1.x)
 
 - `Router<S>` with `.route()`, `.nest()`, `.merge()`, `.fallback()`
-- `MethodRouter` for HTTP method dispatch (`get()`, `post()`, etc.)
 - Radix trie with zero heap allocation on lookup
 - Path parameters (`:id`) and wildcards (`*path`)
 - Route conflict detection at startup
@@ -19,7 +23,7 @@ This crate will provide zero-allocation route matching with path parameters and 
 
 ## Status
 
-**v0.0.1** — Stub. Implementation coming in v0.1.x.
+**v0.0.5** — Method dispatch implemented (`MethodRouter`). Path routing (radix trie) coming in v0.1.x.
 
 ## License
 

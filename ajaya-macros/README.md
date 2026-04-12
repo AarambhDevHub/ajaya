@@ -18,7 +18,7 @@ This crate will provide proc macros for better developer experience and compile-
 
 ## Status
 
-**v0.0.1** — Stub. Implementation coming in v0.7.x.
+**v0.0.5** — Stub. Implementation coming in v0.7.x.
 
 ## License
 

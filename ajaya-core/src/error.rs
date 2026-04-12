@@ -1,27 +1,47 @@
 //! Framework error type.
 //!
-//! Provides the core `Error` type for the Ajaya framework,
+//! Provides the core [`Error`] type for the Ajaya framework,
 //! with HTTP status code and optional public message.
 //!
-//! # Future (v0.0.5)
-//! - `IntoResponse` implementation for `Error`
-//! - `Result<T, E>` blanket `IntoResponse` impl
-//! - Internal error detail hiding
+//! # Error Handling in Handlers
+//!
+//! Handlers can return `Result<impl IntoResponse, Error>` and use
+//! the `?` operator for ergonomic error propagation:
+//!
+//! ```rust,ignore
+//! use ajaya::{Error, Json};
+//! use http::StatusCode;
+//!
+//! async fn handler() -> Result<Json<serde_json::Value>, Error> {
+//!     let data = load_data().await
+//!         .map_err(|e| Error::new(e).with_status(StatusCode::NOT_FOUND))?;
+//!     Ok(Json(data))
+//! }
+//! ```
 
 use std::fmt;
+
+use bytes::Bytes;
+
+use crate::into_response::IntoResponse;
+use crate::response::{Response, ResponseBuilder};
 
 /// Ajaya's framework error type.
 ///
 /// Wraps an inner error with an associated HTTP status code
-/// and optional public-facing message.
+/// and optional public-facing message. Internal error details
+/// are **never** leaked to clients — only the `public_message`
+/// (or a generic status text) is included in the response body.
 ///
-/// # Example (future)
-/// ```rust,ignore
-/// use ajaya_core::Error;
-/// use http::StatusCode;
+/// # JSON Error Response
 ///
-/// let err = Error::new("database connection failed")
-///     .with_status(StatusCode::INTERNAL_SERVER_ERROR);
+/// When converted to a response, `Error` produces a JSON body:
+///
+/// ```json
+/// {
+///     "error": "Not Found",
+///     "code": 404
+/// }
 /// ```
 pub struct Error {
     inner: Box<dyn std::error::Error + Send + Sync>,
@@ -38,6 +58,16 @@ impl Error {
             inner: err.into(),
             status: http::StatusCode::INTERNAL_SERVER_ERROR,
             public_message: None,
+        }
+    }
+
+    /// Create an error with just a status code and message (no inner error).
+    pub fn from_status(status: http::StatusCode) -> Self {
+        let msg = status.canonical_reason().unwrap_or("Unknown Error");
+        Self {
+            inner: msg.into(),
+            status,
+            public_message: Some(msg.to_string()),
         }
     }
 
@@ -90,5 +120,60 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&*self.inner)
+    }
+}
+
+impl IntoResponse for Error {
+    fn into_response(self) -> Response {
+        let status = self.status();
+        let message = self
+            .public_message()
+            .unwrap_or_else(|| status.canonical_reason().unwrap_or("Internal Server Error"))
+            .to_string();
+
+        // JSON error body: { "error": "message", "code": 500 }
+        let body = serde_json::json!({
+            "error": message,
+            "code": status.as_u16(),
+        });
+
+        let json_bytes = serde_json::to_vec(&body).expect("valid JSON serialization");
+
+        ResponseBuilder::new()
+            .status(status)
+            .header(http::header::CONTENT_TYPE, "application/json")
+            .body(crate::Body::from_bytes(Bytes::from(json_bytes)))
+    }
+}
+
+// --- From impls for common error types ---
+
+impl From<std::io::Error> for Error {
+    fn from(err: std::io::Error) -> Self {
+        Self::new(err)
+    }
+}
+
+impl From<serde_json::Error> for Error {
+    fn from(err: serde_json::Error) -> Self {
+        Self::new(err).with_status(http::StatusCode::BAD_REQUEST)
+    }
+}
+
+impl From<http::Error> for Error {
+    fn from(err: http::Error) -> Self {
+        Self::new(err)
+    }
+}
+
+impl From<String> for Error {
+    fn from(msg: String) -> Self {
+        Self::new(msg.as_str()).with_message(msg)
+    }
+}
+
+impl From<&'static str> for Error {
+    fn from(msg: &'static str) -> Self {
+        Self::new(msg).with_message(msg)
     }
 }
