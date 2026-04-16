@@ -186,13 +186,13 @@
 ### `0.2.0` — Extractor Traits
 **Goal:** `FromRequestParts` and `FromRequest` trait definitions.
 
-- [ ] `ajaya-extract`: `FromRequestParts<S>` trait
-- [ ] `ajaya-extract`: `FromRequest<S, M>` trait
-- [ ] `rejection.rs`: `Rejection` type + all built-in rejection variants
-- [ ] `Rejection` implements `IntoResponse` with appropriate status codes
-- [ ] Handler blanket impl updated to support up to 16 extractors (macro-generated)
-- [ ] `Option<T>` wrapper — never rejects, returns `None` on failure
-- [ ] `Result<T, E>` wrapper — returns rejection as `Err`
+- [x] `ajaya-core`: `FromRequestParts<S>` trait
+- [x] `ajaya-core`: `FromRequest<S, M>` trait
+- [x] `rejection.rs`: `Rejection` type + all built-in rejection variants
+- [x] `Rejection` implements `IntoResponse` with appropriate status codes
+- [x] Handler blanket impl updated to support up to 16 extractors (macro-generated)
+- [x] `Option<T>` wrapper — never rejects, returns `None` on failure
+- [x] `Result<T, E>` wrapper — returns rejection as `Err`
 
 **Deliverable:** Extractor trait system in place. Ready to implement all extractors.
 
@@ -201,10 +201,10 @@
 ### `0.2.1` — Path & Query Extractors
 **Goal:** Type-safe path params and query strings.
 
-- [ ] `Path<T: DeserializeOwned>` — deserializes path params via serde
-- [ ] `Query<T: DeserializeOwned>` — deserializes query string via serde
-- [ ] Clear rejection messages: "missing field `id`", "invalid type: expected u32"
-- [ ] `RawPathParams` — untyped `(String, String)` pairs
+- [x] `Path<T: DeserializeOwned>` — deserializes path params via serde
+- [x] `Query<T: DeserializeOwned>` — deserializes query string via serde
+- [x] Clear rejection messages: "missing field `id`", "invalid type: expected u32"
+- [x] `RawPathParams` — untyped `(String, String)` pairs
 
 **Deliverable:** `Path<Uuid>`, `Query<SearchParams>` work in handlers.
 
@@ -213,9 +213,9 @@
 ### `0.2.2` — Header Extractors
 **Goal:** Access request headers in handlers.
 
-- [ ] `TypedHeader<T>` — uses `headers` crate for typed header parsing
-- [ ] Common typed headers: `Authorization`, `ContentType`, `Accept`, `UserAgent`, `Cookie`, `Host`, `Origin`, `Referer`, `ContentLength`
-- [ ] `HeaderMap` extractor — raw access to all headers
+- [x] `TypedHeader<T>` — uses `headers` crate for typed header parsing
+- [x] Common typed headers: `Authorization`, `ContentType`, `Accept`, `UserAgent`, `Cookie`, `Host`, `Origin`, `Referer`, `ContentLength`
+- [x] `HeaderMap` extractor — raw access to all headers
 
 **Deliverable:** `TypedHeader<Authorization<Bearer>>` works in handlers.
 
@@ -224,13 +224,13 @@
 ### `0.2.3` — Request Metadata Extractors
 **Goal:** Access method, URI, version, connection info.
 
-- [ ] `Method` extractor
-- [ ] `Uri` extractor
-- [ ] `Version` extractor (HTTP/1.0, HTTP/1.1, HTTP/2)
-- [ ] `OriginalUri` extractor (before path rewrites)
-- [ ] `MatchedPath` extractor (the route pattern that matched)
-- [ ] `ConnectInfo<T>` extractor — client socket address (requires `serve` config)
-- [ ] `Extension<T>` extractor — typed request extension
+- [x] `Method` extractor
+- [x] `Uri` extractor
+- [x] `Version` extractor (HTTP/1.0, HTTP/1.1, HTTP/2)
+- [x] `OriginalUri` extractor (before path rewrites)
+- [x] `MatchedPath` extractor (the route pattern that matched)
+- [x] `ConnectInfo<T>` extractor — client socket address (requires `serve` config)
+- [x] `Extension<T>` extractor — typed request extension
 
 **Deliverable:** Can access all request metadata without taking `Request` directly.
 
@@ -239,13 +239,13 @@
 ### `0.2.4` — JSON & Form Extractors
 **Goal:** Parse request bodies.
 
-- [ ] `Json<T: DeserializeOwned>` — parses JSON body, validates Content-Type
-- [ ] `Form<T: DeserializeOwned>` — parses `application/x-www-form-urlencoded`
-- [ ] `Bytes` extractor — raw body bytes
-- [ ] `String` extractor — raw body as UTF-8 string
-- [ ] `Body` extractor — raw streaming body (escape hatch)
-- [ ] `Request` extractor — full request (ultimate escape hatch)
-- [ ] Body is consumed once — enforce single body extractor per handler
+- [x] `Json<T: DeserializeOwned>` — parses JSON body, validates Content-Type
+- [x] `Form<T: DeserializeOwned>` — parses `application/x-www-form-urlencoded`
+- [x] `Bytes` extractor — raw body bytes
+- [x] `String` extractor — raw body as UTF-8 string
+- [x] `Body` extractor — raw streaming body (escape hatch)
+- [x] `Request` extractor — full request (ultimate escape hatch)
+- [x] Body is consumed once — enforce single body extractor per handler
 
 **Deliverable:** `Json<CreateUser>` and `Form<LoginForm>` work as handler params.
 
@@ -254,10 +254,10 @@
 ### `0.2.5` — State Extractor
 **Goal:** Access shared application state from handlers.
 
-- [ ] `State<S>` extractor — clones `S` from router state
-- [ ] `FromRef<S>` trait — extract sub-types from app state
+- [x] `State<S>` extractor — clones `S` from router state
+- [x] `FromRef<S>` trait — extract sub-types from app state
 - [ ] `with_state(s)` on `Router` and `MethodRouter`
-- [ ] State must be `Clone + Send + Sync + 'static`
+- [x] State must be `Clone + Send + Sync + 'static`
 - [ ] Error if state not set: clear compile-time message via `#[debug_handler]`
 
 **Deliverable:** `State(db): State<PgPool>` works in handlers.
@@ -267,10 +267,10 @@
 ### `0.2.6` — Multipart Extractor
 **Goal:** Handle file uploads.
 
-- [ ] `Multipart` extractor — wraps `multer` crate
-- [ ] `multipart.next_field()` async iteration
-- [ ] Field: `.name()`, `.file_name()`, `.content_type()`, `.bytes()`, `.chunk()` stream
-- [ ] `MultipartConstraints` — max fields, max field size, max total size
+- [x] `Multipart` extractor — wraps `multer` crate
+- [x] `multipart.next_field()` async iteration
+- [x] Field: `.name()`, `.file_name()`, `.content_type()`, `.bytes()`, `.chunk()` stream
+- [x] `MultipartConstraints` — max fields, max field size, max total size
 - [ ] Returns 413 if limits exceeded
 
 **Deliverable:** File upload endpoint works with streaming field reading.

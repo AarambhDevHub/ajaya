@@ -117,6 +117,38 @@ impl<B> Request<B> {
 }
 
 impl Request<Body> {
+    /// Decompose this request into framework-aware [`RequestParts`] and a [`Body`].
+    ///
+    /// This is the primary method used by the handler system to split
+    /// a request for extractor processing:
+    ///
+    /// 1. `FromRequestParts` extractors operate on `&mut RequestParts`
+    /// 2. `FromRequest` extractors operate on the reconstructed `Request`
+    ///
+    /// Use [`from_request_parts()`](Request::from_request_parts) to reassemble.
+    pub fn into_request_parts(self) -> (crate::request_parts::RequestParts, Body) {
+        let extensions = self.extensions;
+        let (http_parts, body) = self.inner.into_parts();
+        (
+            crate::request_parts::RequestParts {
+                inner: http_parts,
+                extensions,
+            },
+            body,
+        )
+    }
+
+    /// Reconstruct a `Request` from [`RequestParts`] and a [`Body`].
+    ///
+    /// This is the inverse of [`into_request_parts()`](Request::into_request_parts).
+    pub fn from_request_parts(parts: crate::request_parts::RequestParts, body: Body) -> Self {
+        let inner = http::Request::from_parts(parts.inner, body);
+        Self {
+            inner,
+            extensions: parts.extensions,
+        }
+    }
+
     /// Convert a Hyper incoming request into an Ajaya `Request`.
     ///
     /// This wraps the Hyper `Incoming` body into Ajaya's [`Body`] type,

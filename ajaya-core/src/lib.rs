@@ -9,6 +9,9 @@
 //! - [`ResponseBuilder`] — Ergonomic response construction
 //! - [`IntoResponse`] — Trait for handler return types
 //! - [`Handler`] — Trait for request handlers
+//! - [`FromRequest`] — Trait for body-consuming extractors
+//! - [`FromRequestParts`] — Trait for parts-only extractors
+//! - [`RequestParts`] — Non-body request parts for extractors
 //! - [`MethodFilter`] — HTTP method matching
 //! - [`Json`] — JSON response type
 //! - [`Html`] — HTML response type
@@ -16,17 +19,21 @@
 
 pub mod body;
 pub mod error;
+pub mod extract;
 pub mod handler;
 pub mod into_response;
 pub mod method_filter;
 pub mod request;
+pub mod request_parts;
 pub mod response;
 
 // Re-exports
 pub use body::Body;
 pub use error::Error;
+pub use extract::{FromRequest, FromRequestParts};
 pub use handler::Handler;
 pub use into_response::{Html, IntoResponse, Json};
 pub use method_filter::MethodFilter;
 pub use request::Request;
+pub use request_parts::RequestParts;
 pub use response::{Redirect, Response, ResponseBuilder};

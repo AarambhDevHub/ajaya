@@ -166,6 +166,14 @@ where
     }
 }
 
+// --- Infallible → unreachable (for extractors that never fail) ---
+
+impl IntoResponse for std::convert::Infallible {
+    fn into_response(self) -> Response {
+        match self {}
+    }
+}
+
 // --- Result<T, E> → delegates to Ok or Err variant ---
 
 impl<T: IntoResponse, E: IntoResponse> IntoResponse for Result<T, E> {

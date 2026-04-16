@@ -1,63 +1,75 @@
 //! Ajaya (अजय) — The Unconquerable Rust Web Framework
 //!
 //! Entry point binary demonstrating path-based routing
-//! with parameters and wildcards.
+//! with parameters, extractors, and wildcards.
 
-use ajaya::{Error, Json, PathParams, Request, Router, get, serve_app};
+use ajaya::{Error, Json, Path, Query, Router, get, serve_app};
 use http::StatusCode;
+use serde::{Deserialize, Serialize};
 use tracing_subscriber::EnvFilter;
+
+#[derive(Serialize)]
+struct User {
+    id: u64,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct CreateUser {
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct SearchParams {
+    query: String,
+}
 
 /// GET / — JSON health check.
 async fn health() -> Result<Json<serde_json::Value>, Error> {
     Ok(Json(serde_json::json!({
         "status": "healthy",
         "framework": "Ajaya",
-        "version": "0.1.x"
+        "version": "0.2.x"
     })))
 }
 
-/// GET /users — list users.
-async fn list_users() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "users": [
-            { "id": 1, "name": "Alice" },
-            { "id": 2, "name": "Bob" }
-        ]
-    }))
+/// GET /users — list users (with optional query parameter).
+async fn list_users(query: Option<Query<SearchParams>>) -> Json<serde_json::Value> {
+    match query {
+        Some(Query(params)) => Json(serde_json::json!({
+            "message": format!("Searching users for: {}", params.query),
+            "users": []
+        })),
+        None => Json(serde_json::json!({
+            "users": [
+                { "id": 1, "name": "Alice" },
+                { "id": 2, "name": "Bob" }
+            ]
+        })),
+    }
 }
 
-/// POST /users — create a user.
-async fn create_user() -> (StatusCode, Json<serde_json::Value>) {
+/// POST /users — create a user from JSON body.
+async fn create_user(Json(body): Json<CreateUser>) -> (StatusCode, Json<User>) {
     (
         StatusCode::CREATED,
-        Json(serde_json::json!({
-            "id": 3,
-            "name": "Charlie",
-            "status": "created"
-        })),
+        Json(User {
+            id: 3,
+            name: body.name,
+        }),
     )
 }
 
-/// GET /users/:id — get user by ID (path parameter).
-async fn get_user(req: Request) -> Json<serde_json::Value> {
-    let id = req
-        .extension::<PathParams>()
-        .and_then(|p| p.get("id"))
-        .unwrap_or("unknown");
-
-    Json(serde_json::json!({
-        "id": id,
-        "name": "User from path param"
-    }))
+/// GET /users/:id — get user by ID (type-safe path parameter extraction).
+async fn get_user(Path(id): Path<u64>) -> Json<User> {
+    Json(User {
+        id,
+        name: "User from path param".to_string(),
+    })
 }
 
 /// GET /files/*path — wildcard catch-all.
-async fn serve_file(req: Request) -> String {
-    let path = req
-        .extension::<PathParams>()
-        .and_then(|p| p.get("path"))
-        .unwrap_or("unknown");
-
+async fn serve_file(Path(path): Path<String>) -> String {
     format!("Serving file: {path}")
 }
 
@@ -79,15 +91,15 @@ async fn main() {
         r#"
     ╔═══════════════════════════════════════════════╗
     ║                                               ║
-    ║     🔱  Ajaya (अजय) v0.1.x                   ║
+    ║     🔱  Ajaya (अजय) v0.2.x                   ║
     ║     The Unconquerable Rust Web Framework       ║
     ║                                               ║
     ║     → http://localhost:8080                    ║
     ║                                               ║
     ║     Routes:                                    ║
     ║       GET  /           → health check          ║
-    ║       GET  /users      → list users            ║
-    ║       POST /users      → create user           ║
+    ║       GET  /users      → list users (query)    ║
+    ║       POST /users      → create user (json)    ║
     ║       GET  /users/:id  → get user by ID        ║
     ║       GET  /files/*p   → wildcard file serve   ║
     ║       *    *           → 404 Not Found          ║

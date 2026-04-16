@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.0.5-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -17,7 +17,7 @@
 
 **Ajaya** (अजय, *"The Unconquerable"*) is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**. It aims to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> 🔱 **v0.1.6 — Routing System Complete.** Ajaya now features a lightning-fast matchit radix trie router. Write async handlers, extract path variables, nest routers, compose services, and safely propagate errors. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> 🔱 **v0.2.0 — Extractor System Complete.** Ajaya now features a complete extractor system with type-safe Path, Query, Json, Form, State, Multipart, and 10+ more extractors. Handlers support up to 16 extractor parameters with compile-time safety. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -47,18 +47,61 @@ curl http://localhost:8080/not-a-route
 
 ---
 
-## Features (v0.1.6)
+## Features (v0.2.0)
+
+### ✅ Type-Safe Extractors
+
+Extract typed data from requests with compile-time safety. Handlers support up to 16 extractors.
+
+```rust
+use ajaya::{Router, get, post, Json, Path, Query, State};
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+struct SearchParams { q: String, page: Option<u32> }
+
+#[derive(Deserialize)]
+struct CreateUser { name: String, email: String }
+
+#[derive(Serialize)]
+struct User { id: u32, name: String }
+
+// Path + Query extractors
+async fn search(Path(id): Path<u32>, Query(params): Query<SearchParams>) -> String {
+    format!("User {id} searching: {}", params.q)
+}
+
+// JSON body extractor
+async fn create_user(Json(body): Json<CreateUser>) -> Json<User> {
+    Json(User { id: 1, name: body.name })
+}
+```
+
+### ✅ Available Extractors
+
+| Extractor | Source | Notes |
+|---|---|---|
+| `Path<T>` | URL path params | Serde deserialization |
+| `Query<T>` | Query string | Via `serde_urlencoded` |
+| `Json<T>` | Request body | Validates Content-Type |
+| `Form<T>` | Request body | URL-encoded forms |
+| `State<S>` | Router state | Shared app state |
+| `TypedHeader<T>` | Request headers | Via `headers` crate |
+| `Extension<T>` | Extensions map | Middleware data |
+| `MatchedPath` | Router | Route pattern |
+| `ConnectInfo<T>` | Connection | Client address |
+| `Multipart` | Request body | File uploads |
+| `Method` / `Uri` / `Version` | Request | HTTP metadata |
+| `Bytes` / `String` / `Body` | Request body | Raw access |
 
 ### ✅ Powerful Routing System
 
 Zero-allocation request matching, dynamic path parameters, and catch-all wildcards.
 
 ```rust
-use ajaya::{Router, get, serve_app, Json, PathParams, Request};
-use http::StatusCode;
+use ajaya::{Router, get, post, Json, Path};
 
-async fn user(req: Request) -> Json<serde_json::Value> {
-    let id = req.extension::<PathParams>().and_then(|p| p.get("id")).unwrap_or("0");
+async fn get_user(Path(id): Path<u32>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "user_id": id }))
 }
 
@@ -66,10 +109,10 @@ async fn user(req: Request) -> Json<serde_json::Value> {
 async fn main() {
     let app = Router::new()
         .route("/", get(|| async { "Home" }))
-        .route("/users/{id}", get(user))
+        .route("/users/{id}", get(get_user))
         .route("/files/{*path}", get(|| async { "File content" }));
 
-    serve_app("0.0.0.0:8080", app).await.unwrap();
+    ajaya::serve_app("0.0.0.0:8080", app).await.unwrap();
 }
 ```
 
@@ -97,16 +140,6 @@ let app = Router::new()
 | `(StatusCode, T)` | Inherits from `T` | Custom |
 | `Result<T, E>` | Inherits from `Ok`/`Err` | Auto |
 | `Bytes` / `Vec<u8>` | `application/octet-stream` | 200 |
-
-### ✅ Method Dispatch
-
-Bind different handlers to specific HTTP methods securely. Unmatched methods automatically return **405 Method Not Allowed** with an accurate `Allow` header.
-
-```rust
-let router = get(get_handler)
-    .post(create_handler)
-    .delete(delete_handler);
-```
 
 ### ✅ Error Handling
 
@@ -142,10 +175,10 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 |---------|-------|--------|
 | **0.0.x** | Foundation & Core | ✅ Complete |
 | **0.1.x** | Routing System | ✅ Complete |
-| 0.2.x | Extractors | 🚧 Next Up |
-| 0.3.x | Responses & Error Handling | ⏳ Planned |
+| **0.2.x** | Extractors | ✅ Complete |
+| 0.3.x | Responses & Error Handling | 🚧 Next Up |
 | 0.4.x | Middleware | ⏳ Planned |
-| 0.5.x | WebSocket, SSE, Multipart | ⏳ Planned |
+| 0.5.x | WebSocket, SSE | ⏳ Planned |
 | 0.6.x | TLS, HTTP/2, Static Files | ⏳ Planned |
 | 0.7.x | Macros, Testing, Config | ⏳ Planned |
 | 0.8.x | Observability & Security | ⏳ Planned |
@@ -162,7 +195,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical specification incl
 
 ## Performance
 
-Ajaya aims to unify extreme ergonomics with world-class performance. Here is how Ajaya `v0.1.6` compares against the Rust heavyweights in a simple TCP path routing test (`wrk -t4 -c100 -d10s`), built in `--release` mode and run simultaneously on the same hardware.
+Ajaya aims to unify extreme ergonomics with world-class performance. Here is how Ajaya `v0.2.0` compares against the Rust heavyweights in a simple TCP path routing test (`wrk -t4 -c100 -d10s`), built in `--release` mode and run simultaneously on the same hardware.
 
 | Framework | Version | Requests / sec | Latency (avg) | Underlying Engine |
 | --- | --- | --- | --- | --- |

@@ -31,4 +31,4 @@ pub use method_router::{
     MethodRouter, any, delete, get, head, on, options, patch, post, put, trace_method,
 };
 pub use params::PathParams;
-pub use router::Router;
+pub use router::{MatchedPathExt, Router};

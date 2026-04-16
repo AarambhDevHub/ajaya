@@ -4,7 +4,7 @@
 //! in Ajaya. Any async function that takes extractors and returns
 //! an [`IntoResponse`] type can be used as a handler.
 //!
-//! # Supported Handler Signatures (v0.0.3)
+//! # Supported Handler Signatures
 //!
 //! ```rust,ignore
 //! // Zero-argument handler
@@ -14,13 +14,21 @@
 //! async fn echo(req: Request) -> String {
 //!     format!("You requested: {}", req.uri())
 //! }
-//! ```
 //!
-//! More extractor-based signatures will be supported in v0.2.x.
+//! // Extractor-based handlers (up to 16 extractors)
+//! async fn handler(
+//!     method: Method,
+//!     Path(id): Path<u32>,
+//!     Json(body): Json<Payload>,
+//! ) -> impl IntoResponse {
+//!     // ...
+//! }
+//! ```
 
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::extract::{FromRequest, FromRequestParts};
 use crate::into_response::IntoResponse;
 use crate::request::Request;
 use crate::response::Response;
@@ -56,9 +64,11 @@ pub trait Handler<T, S = ()>: Clone + Send + 'static {
     fn call(self, req: Request, state: S) -> Self::Future;
 }
 
-// --- Blanket impl: async fn() -> impl IntoResponse ---
+// ---------------------------------------------------------------------------
+// Blanket impl: async fn() -> impl IntoResponse (zero extractors)
+// ---------------------------------------------------------------------------
 
-impl<F, Fut, Res, S> Handler<(), S> for F
+impl<F, Fut, Res, S> Handler<((),), S> for F
 where
     F: FnOnce() -> Fut + Clone + Send + 'static,
     Fut: Future<Output = Res> + Send + 'static,
@@ -72,26 +82,94 @@ where
     }
 }
 
-// --- Blanket impl: async fn(Request) -> impl IntoResponse ---
+// ---------------------------------------------------------------------------
+// Macro-generated blanket impls for 1..16 extractors
+// ---------------------------------------------------------------------------
+//
+// For a handler `async fn(T1, T2, ..., Tn) -> R`:
+//   - T1 through T(n-1) must implement `FromRequestParts<S>`
+//   - Tn (the last parameter) must implement `FromRequest<S>`
+//     (which includes all `FromRequestParts` types via blanket impl)
+//
+// This means body-consuming extractors (Json, Form, etc.) must be the
+// last parameter, while parts-only extractors (Method, Path, etc.)
+// can appear in any order before it.
 
-/// Marker type for handlers that take a full [`Request`].
-pub struct RequestMarker;
+macro_rules! impl_handler {
+    (
+        [$($ty:ident),*], $last:ident
+    ) => {
+        #[allow(non_snake_case, unused_mut, unused_variables)]
+        impl<F, Fut, Res, S, M, $($ty,)* $last> Handler<(M, $($ty,)* $last,), S> for F
+        where
+            F: FnOnce($($ty,)* $last) -> Fut + Clone + Send + 'static,
+            Fut: Future<Output = Res> + Send + 'static,
+            Res: IntoResponse,
+            S: Clone + Send + Sync + 'static,
+            $( $ty: FromRequestParts<S> + Send, )*
+            $last: FromRequest<S, M> + Send,
+        {
+            type Future = Pin<Box<dyn Future<Output = Response> + Send + 'static>>;
 
-impl<F, Fut, Res, S> Handler<(RequestMarker,), S> for F
-where
-    F: FnOnce(Request) -> Fut + Clone + Send + 'static,
-    Fut: Future<Output = Res> + Send + 'static,
-    Res: IntoResponse,
-    S: Send + 'static,
-{
-    type Future = Pin<Box<dyn Future<Output = Response> + Send + 'static>>;
+            fn call(self, req: Request, state: S) -> Self::Future {
+                Box::pin(async move {
+                    let (mut parts, body) = req.into_request_parts();
 
-    fn call(self, req: Request, _state: S) -> Self::Future {
-        Box::pin(async move { self(req).await.into_response() })
-    }
+                    $(
+                        let $ty = match $ty::from_request_parts(&mut parts, &state).await {
+                            Ok(value) => value,
+                            Err(rejection) => return rejection.into_response(),
+                        };
+                    )*
+
+                    let req = Request::from_request_parts(parts, body);
+
+                    let $last = match $last::from_request(req, &state).await {
+                        Ok(value) => value,
+                        Err(rejection) => return rejection.into_response(),
+                    };
+
+                    self($($ty,)* $last).await.into_response()
+                })
+            }
+        }
+    };
 }
 
-// --- Type-erased handler for dynamic dispatch ---
+// Generate implementations for 1 to 16 extractors.
+// The last type is always extracted via FromRequest (body consumer).
+// All preceding types are extracted via FromRequestParts.
+impl_handler!([], T1);
+impl_handler!([T1], T2);
+impl_handler!([T1, T2], T3);
+impl_handler!([T1, T2, T3], T4);
+impl_handler!([T1, T2, T3, T4], T5);
+impl_handler!([T1, T2, T3, T4, T5], T6);
+impl_handler!([T1, T2, T3, T4, T5, T6], T7);
+impl_handler!([T1, T2, T3, T4, T5, T6, T7], T8);
+impl_handler!([T1, T2, T3, T4, T5, T6, T7, T8], T9);
+impl_handler!([T1, T2, T3, T4, T5, T6, T7, T8, T9], T10);
+impl_handler!([T1, T2, T3, T4, T5, T6, T7, T8, T9, T10], T11);
+impl_handler!([T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11], T12);
+impl_handler!([T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12], T13);
+impl_handler!(
+    [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13],
+    T14
+);
+impl_handler!(
+    [T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14],
+    T15
+);
+impl_handler!(
+    [
+        T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T13, T14, T15
+    ],
+    T16
+);
+
+// ---------------------------------------------------------------------------
+// Type-erased handler for dynamic dispatch
+// ---------------------------------------------------------------------------
 
 /// Trait object interface for type-erased handlers.
 ///

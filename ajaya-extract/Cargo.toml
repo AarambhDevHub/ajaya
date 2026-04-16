@@ -9,3 +9,18 @@ rust-version.workspace = true
 description = "Request extractors for the Ajaya web framework"
 
 [dependencies]
+ajaya-core       = { workspace = true }
+ajaya-router     = { workspace = true }
+http             = { workspace = true }
+http-body        = { workspace = true }
+http-body-util   = { workspace = true }
+bytes            = { workspace = true }
+serde            = { workspace = true }
+serde_json       = { workspace = true }
+serde_urlencoded = { workspace = true }
+mime             = { workspace = true }
+percent-encoding = { workspace = true }
+thiserror        = { workspace = true }
+multer           = { workspace = true }
+headers          = { workspace = true }
+futures-util     = { workspace = true }
