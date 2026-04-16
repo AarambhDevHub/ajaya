@@ -201,7 +201,7 @@ Ajaya aims to unify extreme ergonomics with world-class performance. Here is how
 | --- | --- | --- | --- | --- |
 | Actix-Web | v4 | `331,131 req/s` | `483 µs` | Custom HTTP worker model |
 | Axum | v0.8.x | `301,439 req/s` | `349 µs` | Tokio / Hyper 1.x |
-| **Ajaya** | **v0.1.6** | **`291,759 req/s`** | **`363 µs`** | Tokio / Hyper 1.x |
+| **Ajaya** | **v0.2.0** | **`307,177 req/s`** | **`333 µs`** | Tokio / Hyper 1.x |
 
 *Tested using `wrk` with 100 concurrent workers across 4 threads for 10 seconds. Ajaya achieves performance completely matched with Axum out of the box, powered by its zero-allocation radix trie path routing.*
 
