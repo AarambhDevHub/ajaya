@@ -9,6 +9,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.6] — 2026-04-16 — Multipart Extractor
+
+### Added
+- `Multipart` extractor — wraps `multer` crate for streaming multipart parsing
+- `Multipart::next_field()` — async iteration over multipart fields
+- `Field` type with `.name()`, `.file_name()`, `.content_type()`, `.bytes()`, `.text()`, `.chunk()`
+- `MultipartConstraints` — configurable limits (max fields: 100, max field: 5MB, max total: 50MB)
+- `MultipartRejection` — validates `Content-Type: multipart/form-data` and boundary extraction
+
+---
+
+## [0.2.5] — 2026-04-16 — State Extractor
+
+### Added
+- `State<S>` extractor — clones application state from router configuration
+- `FromRef<T>` trait — extract sub-types from application state
+- Identity `FromRef<T> for T` blanket impl (clone the whole state)
+
+---
+
+## [0.2.4] — 2026-04-16 — JSON, Form & Body Extractors
+
+### Added
+- `Json<T>` extractor — parses JSON body with `Content-Type: application/json` validation
+  - Also implements `IntoResponse` for symmetric use as both extractor and response type
+  - Supports `application/*+json` subtypes (e.g., `application/vnd.api+json`)
+- `Form<T>` extractor — parses `application/x-www-form-urlencoded` body via `serde_urlencoded`
+- `Bytes` extractor — raw body as `bytes::Bytes` (implemented in `ajaya-core`)
+- `String` extractor — raw body as UTF-8 string (implemented in `ajaya-core`)
+- `Body` extractor — raw streaming body escape hatch (implemented in `ajaya-core`)
+- `Request` extractor — full request escape hatch (implemented in `ajaya-core`)
+- Body consumption enforced: only one `FromRequest` extractor per handler (last parameter)
+
+---
+
+## [0.2.3] — 2026-04-16 — Request Metadata Extractors
+
+### Added
+- `http::Method` extractor — infallible, returns request method
+- `http::Uri` extractor — infallible, returns request URI
+- `http::Version` extractor — infallible, returns HTTP version
+- `OriginalUri` extractor — URI before path rewrites by nesting
+- `MatchedPath` extractor — the route pattern that matched (e.g., `/users/{id}`)
+- `ConnectInfo<T>` extractor — client connection info (e.g., `SocketAddr`)
+- `Extension<T>` extractor — typed request extension set by middleware
+- Router inserts `MatchedPathExt` into request extensions during dispatch
+- `MatchedPathExt` type exported from `ajaya-router`
+
+---
+
+## [0.2.2] — 2026-04-16 — Header Extractors
+
+### Added
+- `TypedHeader<T>` extractor — uses `headers` crate for strongly-typed header parsing
+  - Supports all `headers::Header` types: `Authorization`, `ContentType`, `Host`, etc.
+- `http::HeaderMap` extractor — clones the full header map (implemented in `ajaya-core`)
+- `headers` crate (`v0.4`) added as workspace dependency
+
+---
+
+## [0.2.1] — 2026-04-16 — Path & Query Extractors
+
+### Added
+- `Path<T>` extractor — type-safe path parameter extraction via custom serde deserializer
+  - Single value: `Path<u32>`, tuple: `Path<(u32, String)>`, struct: `Path<UserParams>`
+  - Clear error messages on deserialization failures
+- `Query<T>` extractor — query string parsing via `serde_urlencoded`
+- `RawPathParams` extractor — untyped `Vec<(String, String)>` path param pairs
+- Custom `PathDeserializer` with support for structs, tuples, enums, and all primitive types
+
+---
+
+## [0.2.0] — 2026-04-16 — Extractor Traits & Handler Macro
+
+### Added
+- **`FromRequestParts<S>` trait** — for extractors that don't consume the body
+- **`FromRequest<S, M>` trait** — for body-consuming extractors (must be last handler param)
+- `ViaParts` / `ViaRequest` marker types for blanket impl disambiguation
+- Blanket impl: every `FromRequestParts` is also a `FromRequest` (via `ViaParts` marker)
+- `Option<T>` wrapper — never rejects, returns `None` on extraction failure
+- `Result<T, T::Rejection>` wrapper — gives handler access to the rejection error
+- **Handler macro** — `impl_handler!` generates blanket impls for 0–16 extractors
+  - T1..T(N-1) extracted from `RequestParts` via `FromRequestParts`
+  - Last param TN extracted from full `Request` via `FromRequest`
+- `RequestParts` struct — framework-aware request parts (HTTP parts + extensions)
+- `Request::into_request_parts()` / `Request::from_request_parts()` — decompose/reconstruct
+- `IntoResponse for Infallible` — for extractors that never fail
+- **Rejection types** — per-extractor rejection enums implementing `IntoResponse`:
+  - `PathRejection`, `QueryRejection`, `JsonRejection`, `FormRejection`
+  - `TypedHeaderRejection`, `ExtensionRejection`, `StateRejection`
+  - `BodyRejection`, `StringRejection`, `MultipartRejection`
+  - `MatchedPathRejection`, `ConnectInfoRejection`
+
+### Changed
+- **BREAKING:** Handler blanket impls rewritten — now macro-generated for 0–16 extractors
+  - Previous: only `fn()` and `fn(Request)` were supported
+  - Now: any combination of extractors up to 16 parameters
+- `Handler` trait now requires `S: Clone + Send + Sync` (state must be cloneable)
+- Workspace version bumped from `0.1.6` to `0.2.0`
+- All internal crate versions updated to `0.2.0`
+
+### Dependencies
+- Added `headers = "0.4"` to workspace
+
 ## [0.1.6] — 2026-04-12 — Tower Service Nesting
 
 ### Added
@@ -206,7 +310,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.5...HEAD
+[Unreleased]: https://github.com/AarambhDevHub/ajaya/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/AarambhDevHub/ajaya/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/AarambhDevHub/ajaya/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/AarambhDevHub/ajaya/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/AarambhDevHub/ajaya/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/AarambhDevHub/ajaya/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/AarambhDevHub/ajaya/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/AarambhDevHub/ajaya/compare/v0.1.6...v0.2.0
+[0.1.6]: https://github.com/AarambhDevHub/ajaya/compare/v0.1.5...v0.1.6
 [0.0.5]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.4...v0.0.5
 [0.0.4]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.3...v0.0.4
 [0.0.3]: https://github.com/AarambhDevHub/ajaya/compare/v0.0.2...v0.0.3

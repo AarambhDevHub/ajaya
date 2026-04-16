@@ -32,6 +32,12 @@ use crate::method_router::MethodRouter;
 use crate::params::PathParams;
 use crate::service::ServiceHandler;
 
+/// Extension type inserted by the router to record which route pattern matched.
+///
+/// Used by the `MatchedPath` extractor in `ajaya-extract`.
+#[derive(Debug, Clone)]
+pub struct MatchedPathExt(pub String);
+
 /// Path-based HTTP router.
 ///
 /// Routes incoming requests to [`MethodRouter`]s based on the request
@@ -218,6 +224,9 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
             Ok(matched) => {
                 let idx = *matched.value;
 
+                // Store the matched route pattern
+                let pattern = self.routes[idx].0.clone();
+
                 // Extract path params from the match
                 let matchit_params = matched.params;
                 if !matchit_params.is_empty() {
@@ -228,6 +237,9 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
                     }
                     req.extensions_mut().insert(path_params);
                 }
+
+                // Insert matched path pattern for extractors
+                req.extensions_mut().insert(MatchedPathExt(pattern));
 
                 // Delegate to the method router
                 self.routes[idx].1.call(req, state).await
