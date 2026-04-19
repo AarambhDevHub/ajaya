@@ -258,7 +258,6 @@
 - [x] `FromRef<S>` trait — extract sub-types from app state
 - [ ] `with_state(s)` on `Router` and `MethodRouter`
 - [x] State must be `Clone + Send + Sync + 'static`
-- [ ] Error if state not set: clear compile-time message via `#[debug_handler]`
 
 **Deliverable:** `State(db): State<PgPool>` works in handlers.
 
@@ -637,6 +636,7 @@
 - [ ] Points error at the offending extractor, not at `.route()` call site
 - [ ] Detects multiple body extractors
 - [ ] Detects missing state
+- [ ] Error if state not set: clear compile-time message via `#[debug_handler]`
 - [ ] Works with all extractor types
 
 **Deliverable:** A wrong handler signature gives a clear error with line number.
