@@ -256,7 +256,7 @@
 
 - [x] `State<S>` extractor — clones `S` from router state
 - [x] `FromRef<S>` trait — extract sub-types from app state
-- [ ] `with_state(s)` on `Router` and `MethodRouter`
+- [x] `with_state(s)` on `Router` and `MethodRouter`
 - [x] State must be `Clone + Send + Sync + 'static`
 
 **Deliverable:** `State(db): State<PgPool>` works in handlers.
@@ -270,7 +270,7 @@
 - [x] `multipart.next_field()` async iteration
 - [x] Field: `.name()`, `.file_name()`, `.content_type()`, `.bytes()`, `.chunk()` stream
 - [x] `MultipartConstraints` — max fields, max field size, max total size
-- [ ] Returns 413 if limits exceeded
+- [x] Returns 413 if limits exceeded
 
 **Deliverable:** File upload endpoint works with streaming field reading.
 

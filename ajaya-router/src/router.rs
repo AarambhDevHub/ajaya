@@ -21,7 +21,9 @@
 //!     .route("/users/:id", get(get_user));
 //! ```
 
+use crate::method_router::StateBound;
 use std::convert::Infallible;
+use std::sync::Arc;
 
 use ajaya_core::handler::ErasedHandler;
 use ajaya_core::request::Request;
@@ -210,6 +212,56 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
         let wildcard_path = format!("{prefix}/*__rest");
         let handler = ServiceHandler::new(service);
         self.route(&wildcard_path, crate::any(handler))
+    }
+
+    /// Bind application state, converting `Router<S>` → `Router<()>`.
+    ///
+    /// This is the final step before passing your router to [`serve_app`].
+    /// Every handler in every route (including the fallback) receives a clone
+    /// of `state` on each request.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use ajaya::{Router, State, get, serve_app};
+    ///
+    /// #[derive(Clone)]
+    /// struct AppState { db: PgPool }
+    ///
+    /// async fn list_users(State(s): State<AppState>) -> &'static str { "users" }
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let state = AppState { db: connect().await };
+    ///     let app = Router::new()
+    ///         .route("/users", get(list_users))
+    ///         .with_state(state);
+    ///     serve_app("0.0.0.0:8080", app).await.unwrap();
+    /// }
+    /// ```
+    pub fn with_state(self, state: S) -> Router<()> {
+        let state = Arc::new(state);
+
+        // Convert every MethodRouter<S> to MethodRouter<()>
+        let routes: Vec<(String, MethodRouter<()>)> = self
+            .routes
+            .into_iter()
+            .map(|(path, mr)| (path, mr.with_state((*state).clone())))
+            .collect();
+
+        // Convert fallback if present
+        let fallback: Option<Box<dyn ErasedHandler<()>>> = self.fallback.map(|f| {
+            Box::new(StateBound {
+                inner: f,
+                state: Arc::clone(&state),
+            }) as Box<dyn ErasedHandler<()>>
+        });
+
+        Router {
+            inner: self.inner, // matchit::Router<usize> is purely structural — reuse it
+            routes,
+            fallback,
+        }
     }
 
     /// Dispatch a request based on its URI path and HTTP method.

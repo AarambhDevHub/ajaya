@@ -14,7 +14,9 @@
 //! let router = get(hello).post(create);
 //! ```
 
-use ajaya_core::handler::{ErasedHandler, Handler, into_erased};
+use std::sync::Arc;
+
+use ajaya_core::handler::{BoxFuture, ErasedHandler, Handler, into_erased};
 use ajaya_core::method_filter::MethodFilter;
 use ajaya_core::request::Request;
 use ajaya_core::response::{Response, ResponseBuilder};
@@ -145,6 +147,69 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
             .status(StatusCode::METHOD_NOT_ALLOWED)
             .header(http::header::ALLOW, allow_header)
             .text("Method Not Allowed")
+    }
+
+    /// Bind application state, converting `MethodRouter<S>` → `MethodRouter<()>`.
+    ///
+    /// After calling this, the method router is ready to be served directly
+    /// or attached to a [`Router`] that is itself bound with [`Router::with_state`].
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use ajaya::{get, State};
+    ///
+    /// async fn handler(State(s): State<AppState>) -> String { s.greeting }
+    ///
+    /// let method_router = get(handler).with_state(AppState { greeting: "hi".into() });
+    /// ```
+    pub fn with_state(self, state: S) -> MethodRouter<()> {
+        let state = Arc::new(state);
+        let handlers = self
+            .handlers
+            .into_iter()
+            .map(|(filter, handler)| {
+                let bound: Box<dyn ErasedHandler<()>> = Box::new(StateBound {
+                    inner: handler,
+                    state: Arc::clone(&state),
+                });
+                (filter, bound)
+            })
+            .collect();
+
+        MethodRouter {
+            handlers,
+            allow_methods: self.allow_methods,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StateBound — binds state S into a type-erased handler, yielding ErasedHandler<()>
+// ---------------------------------------------------------------------------
+
+/// Adapter that captures application state `S` inside a type-erased handler,
+/// converting `Box<dyn ErasedHandler<S>>` into `ErasedHandler<()>`.
+///
+/// This is the internal mechanism behind [`MethodRouter::with_state`] and
+/// [`Router::with_state`].
+pub(crate) struct StateBound<S> {
+    pub(crate) inner: Box<dyn ErasedHandler<S>>,
+    pub(crate) state: Arc<S>,
+}
+
+impl<S: Clone + Send + Sync + 'static> ErasedHandler<()> for StateBound<S> {
+    fn clone_box(&self) -> Box<dyn ErasedHandler<()>> {
+        Box::new(StateBound {
+            inner: self.inner.clone_box(),
+            state: Arc::clone(&self.state),
+        })
+    }
+
+    fn call(self: Box<Self>, req: Request, _state: ()) -> BoxFuture<'static, Response> {
+        // Clone S out of the Arc once per call — cheap for small state
+        let state = (*self.state).clone();
+        self.inner.call(req, state)
     }
 }
 

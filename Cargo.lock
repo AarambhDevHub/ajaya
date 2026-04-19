@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya"
-version = "0.2.0"
+version = "0.2.6"
 dependencies = [
  "ajaya-core",
  "ajaya-extract",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya-core"
-version = "0.2.0"
+version = "0.2.6"
 dependencies = [
  "bytes",
  "futures-util",
@@ -47,7 +47,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya-extract"
-version = "0.2.0"
+version = "0.2.6"
 dependencies = [
  "ajaya-core",
  "ajaya-router",
@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya-hyper"
-version = "0.2.0"
+version = "0.2.6"
 dependencies = [
  "ajaya-core",
  "ajaya-router",
@@ -84,15 +84,15 @@ dependencies = [
 
 [[package]]
 name = "ajaya-macros"
-version = "0.2.0"
+version = "0.2.6"
 
 [[package]]
 name = "ajaya-middleware"
-version = "0.2.0"
+version = "0.2.6"
 
 [[package]]
 name = "ajaya-router"
-version = "0.2.0"
+version = "0.2.6"
 dependencies = [
  "ajaya-core",
  "bytes",
@@ -107,23 +107,23 @@ dependencies = [
 
 [[package]]
 name = "ajaya-sse"
-version = "0.2.0"
+version = "0.2.6"
 
 [[package]]
 name = "ajaya-static"
-version = "0.2.0"
+version = "0.2.6"
 
 [[package]]
 name = "ajaya-test"
-version = "0.2.0"
+version = "0.2.6"
 
 [[package]]
 name = "ajaya-tls"
-version = "0.2.0"
+version = "0.2.6"
 
 [[package]]
 name = "ajaya-ws"
-version = "0.2.0"
+version = "0.2.6"
 
 [[package]]
 name = "atomic-waker"
