@@ -3,10 +3,15 @@
 //! Entry point binary demonstrating path-based routing
 //! with parameters, extractors, and wildcards.
 
-use ajaya::{Error, Json, Path, Query, Router, get, serve_app};
+use ajaya::{Error, Json, Multipart, Path, Query, Router, State, get, post, serve_app};
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::EnvFilter;
+
+#[derive(Clone)]
+struct AppState {
+    app_name: String,
+}
 
 #[derive(Serialize)]
 struct User {
@@ -22,6 +27,20 @@ struct CreateUser {
 #[derive(Deserialize)]
 struct SearchParams {
     query: String,
+}
+
+/// GET /state — read app state.
+async fn read_state(State(state): State<AppState>) -> String {
+    format!("App name from state: {}", state.app_name)
+}
+
+/// POST /upload — multipart upload.
+async fn upload(mut multipart: Multipart) -> String {
+    let mut count = 0;
+    while let Ok(Some(_field)) = multipart.next_field().await {
+        count += 1;
+    }
+    format!("Received {} fields", count)
 }
 
 /// GET / — JSON health check.
@@ -98,9 +117,11 @@ async fn main() {
     ║                                               ║
     ║     Routes:                                    ║
     ║       GET  /           → health check          ║
+    ║       GET  /state      → read app state        ║
     ║       GET  /users      → list users (query)    ║
     ║       POST /users      → create user (json)    ║
     ║       GET  /users/:id  → get user by ID        ║
+    ║       POST /upload     → multipart upload      ║
     ║       GET  /files/*p   → wildcard file serve   ║
     ║       *    *           → 404 Not Found          ║
     ║                                               ║
@@ -108,12 +129,19 @@ async fn main() {
 "#
     );
 
+    let state = AppState {
+        app_name: "Ajaya Framework (v0.2.6)".to_string(),
+    };
+
     let app = Router::new()
         .route("/", get(health))
+        .route("/state", get(read_state))
         .route("/users", get(list_users).post(create_user))
         .route("/users/{id}", get(get_user))
+        .route("/upload", post(upload))
         .route("/files/{*path}", get(serve_file))
-        .fallback(not_found);
+        .fallback(not_found)
+        .with_state(state);
 
     if let Err(e) = serve_app("0.0.0.0:8080", app).await {
         tracing::error!("Server error: {}", e);

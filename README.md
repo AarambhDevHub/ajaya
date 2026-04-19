@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.6-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -17,7 +17,7 @@
 
 **Ajaya** (अजय, *"The Unconquerable"*) is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**. It aims to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> 🔱 **v0.2.0 — Extractor System Complete.** Ajaya now features a complete extractor system with type-safe Path, Query, Json, Form, State, Multipart, and 10+ more extractors. Handlers support up to 16 extractor parameters with compile-time safety. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> 🔱 **v0.2.6 — Extractor System Complete.** Ajaya now features a complete extractor system with type-safe Path, Query, Json, Form, State, Multipart, and 10+ more extractors. Handlers support up to 16 extractor parameters with compile-time safety. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -47,7 +47,7 @@ curl http://localhost:8080/not-a-route
 
 ---
 
-## Features (v0.2.0)
+## Features (v0.2.6)
 
 ### ✅ Type-Safe Extractors
 
@@ -195,13 +195,13 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical specification incl
 
 ## Performance
 
-Ajaya aims to unify extreme ergonomics with world-class performance. Here is how Ajaya `v0.2.0` compares against the Rust heavyweights in a simple TCP path routing test (`wrk -t4 -c100 -d10s`), built in `--release` mode and run simultaneously on the same hardware.
+Ajaya aims to unify extreme ergonomics with world-class performance. Here is how Ajaya `v0.2.6` compares against the Rust heavyweights in a simple TCP path routing test (`wrk -t4 -c100 -d10s`), built in `--release` mode and run simultaneously on the same hardware.
 
 | Framework | Version | Requests / sec | Latency (avg) | Underlying Engine |
 | --- | --- | --- | --- | --- |
 | Actix-Web | v4 | `331,131 req/s` | `483 µs` | Custom HTTP worker model |
 | Axum | v0.8.x | `301,439 req/s` | `349 µs` | Tokio / Hyper 1.x |
-| **Ajaya** | **v0.2.0** | **`307,177 req/s`** | **`333 µs`** | Tokio / Hyper 1.x |
+| **Ajaya** | **v0.2.6** | **`307,177 req/s`** | **`333 µs`** | Tokio / Hyper 1.x |
 
 *Tested using `wrk` with 100 concurrent workers across 4 threads for 10 seconds. Ajaya achieves performance completely matched with Axum out of the box, powered by its zero-allocation radix trie path routing.*
 

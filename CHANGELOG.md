@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Field` type with `.name()`, `.file_name()`, `.content_type()`, `.bytes()`, `.text()`, `.chunk()`
 - `MultipartConstraints` — configurable limits (max fields: 100, max field: 5MB, max total: 50MB)
 - `MultipartRejection` — validates `Content-Type: multipart/form-data` and boundary extraction
+- `MultipartRejection::PayloadTooLarge` — Returns `413 Payload Too Large` when constraints are exceeded
 
 ---
 
@@ -26,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `State<S>` extractor — clones application state from router configuration
 - `FromRef<T>` trait — extract sub-types from application state
 - Identity `FromRef<T> for T` blanket impl (clone the whole state)
+- `Router::with_state` and `MethodRouter::with_state` methods for attaching application state
 
 ---
 

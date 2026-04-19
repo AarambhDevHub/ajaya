@@ -304,6 +304,12 @@ pub enum MultipartRejection {
     MissingBoundary,
     /// Multipart parsing error.
     MultipartError(String),
+
+    /// Request body exceeds the configured size limit.
+    ///
+    /// Returned when `Content-Length` exceeds `MultipartConstraints::max_total_size`,
+    /// or when the streaming body grows past that threshold.
+    PayloadTooLarge,
 }
 
 impl std::fmt::Display for MultipartRejection {
@@ -312,6 +318,7 @@ impl std::fmt::Display for MultipartRejection {
             Self::InvalidContentType => write!(f, "Expected Content-Type: multipart/form-data"),
             Self::MissingBoundary => write!(f, "Missing multipart boundary in Content-Type"),
             Self::MultipartError(msg) => write!(f, "Multipart error: {msg}"),
+            Self::PayloadTooLarge => write!(f, "Request payload exceeds the maximum allowed size"),
         }
     }
 }
@@ -320,6 +327,7 @@ impl IntoResponse for MultipartRejection {
     fn into_response(self) -> Response {
         let status = match &self {
             MultipartRejection::InvalidContentType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            MultipartRejection::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             _ => StatusCode::BAD_REQUEST,
         };
         ResponseBuilder::new()
