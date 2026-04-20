@@ -1,14 +1,23 @@
 //! # ajaya-middleware
 //!
-//! Built-in middleware for the Ajaya web framework.
+//! Built-in Tower middleware layers for the Ajaya web framework.
 //!
-//! This crate will provide Tower-compatible middleware:
-//! - `CorsLayer` — CORS handling
-//! - `CompressionLayer` — gzip/brotli/zstd compression
-//! - `TimeoutLayer` — request timeout
-//! - `RateLimitLayer` — rate limiting
-//! - `TraceLayer` — structured logging
-//! - `CatchPanicLayer` — panic recovery
-//! - Security header middleware
+//! ## Available middleware
 //!
-//! **Status:** Stub — implementation coming in v0.4.x
+//! | Layer | Feature | Status |
+//! |---|---|---|
+//! | [`cors::CorsLayer`] | CORS — preflight + response headers | ✅ 0.4.1 |
+//! | `CompressionLayer` | gzip / br / zstd | ⏳ 0.4.2 |
+//! | `TimeoutLayer` | Request timeout | ⏳ 0.4.3 |
+//! | `RequestIdLayer` | UUID per request | ⏳ 0.4.4 |
+//! | `TraceLayer` | Structured logging | ⏳ 0.4.5 |
+//! | `SecurityHeadersLayer` | OWASP security headers | ⏳ 0.4.6 |
+//! | `RateLimitLayer` | Token bucket rate limiting | ⏳ 0.4.7 |
+//! | `RequireAuthLayer` | Bearer / Basic auth | ⏳ 0.4.8 |
+//! | `CatchPanicLayer` | Panic recovery → 500 | ⏳ 0.4.9 |
+//! | `RequestBodyLimitLayer` | Body size → 413 | ⏳ 0.4.9 |
+//! | `CsrfLayer` | CSRF token | ⏳ 0.4.11 |
+
+pub mod cors;
+
+pub use cors::CorsLayer;

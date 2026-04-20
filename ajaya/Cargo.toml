@@ -13,6 +13,7 @@ ajaya-core    = { workspace = true }
 ajaya-hyper   = { workspace = true }
 ajaya-router  = { workspace = true }
 ajaya-extract = { workspace = true }
+ajaya-middleware = { workspace = true }
 tokio         = { workspace = true }
 http          = { workspace = true }
 bytes         = { workspace = true }
@@ -22,3 +23,6 @@ tracing       = { workspace = true }
 tracing-subscriber = { workspace = true }
 cookie           = { workspace = true }
 futures-util     = { workspace = true }
+tower-layer   = { workspace = true }
+tower-service = { workspace = true }
+uuid = { workspace = true }

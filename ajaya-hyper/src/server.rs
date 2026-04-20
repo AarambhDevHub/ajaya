@@ -8,13 +8,14 @@ use std::sync::Arc;
 
 use ajaya_core::Body;
 use ajaya_core::handler::Handler;
-use ajaya_router::MethodRouter;
-use ajaya_router::Router;
+use ajaya_router::layer::BoxCloneService;
+use ajaya_router::{MethodRouter, Router};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto::Builder;
 use tokio::net::TcpListener;
+use tower_service::Service as _;
 
 /// The Ajaya HTTP server.
 ///
@@ -55,9 +56,75 @@ impl Server {
         self.addr
     }
 
-    /// Start serving HTTP requests using the provided handler.
+    // ── Serve methods ────────────────────────────────────────────────────────
+
+    /// Serve any pre-built Tower [`BoxCloneService`].
     ///
-    /// Any async function that returns `impl IntoResponse` works.
+    /// This is the lowest-level serve method. Use it when you've composed
+    /// middleware manually via `router.into_service()` and want full control.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let svc = app
+    ///     .layer(CorsLayer::permissive())
+    ///     .with_state(state)
+    ///     .into_service();
+    ///
+    /// Server::bind("0.0.0.0:8080").await?.serve_service(svc).await?;
+    /// ```
+    pub async fn serve_service(
+        self,
+        service: BoxCloneService,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        loop {
+            let (stream, peer_addr) = self.listener.accept().await?;
+            let io = TokioIo::new(stream);
+            let svc = service.clone();
+
+            tracing::debug!("Accepted connection from {}", peer_addr);
+
+            tokio::task::spawn(async move {
+                // let svc = svc;
+                let hyper_svc = service_fn(move |req: hyper::Request<Incoming>| {
+                    let mut s = svc.clone();
+                    async move {
+                        let ajaya_req = ajaya_core::Request::from_hyper(req);
+                        // poll_ready is always Poll::Ready for our services
+                        let _ = std::future::poll_fn(|cx| s.poll_ready(cx)).await;
+                        let response = s
+                            .call(ajaya_req)
+                            .await
+                            .unwrap_or_else(|infallible| match infallible {});
+                        Ok::<http::Response<Body>, hyper::Error>(response)
+                    }
+                });
+
+                if let Err(err) = Builder::new(TokioExecutor::new())
+                    .serve_connection(io, hyper_svc)
+                    .await
+                {
+                    tracing::error!("Connection error: {}", err);
+                }
+            });
+        }
+    }
+
+    /// Serve a [`Router`] with all configured layers applied.
+    ///
+    /// Calls [`Router::into_service`] internally. This is the recommended
+    /// entry point for most applications.
+    pub async fn serve_app(
+        self,
+        router: Router,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let svc = router.into_service();
+        self.serve_service(svc).await
+    }
+
+    /// Serve a bare async handler (no routing, no layers).
+    ///
+    /// Useful for simple single-handler servers or testing.
     pub async fn serve<H, T>(
         self,
         handler: H,
@@ -75,7 +142,7 @@ impl Server {
 
             tokio::task::spawn(async move {
                 let handler = handler.clone();
-                let service = service_fn(move |req: hyper::Request<Incoming>| {
+                let hyper_svc = service_fn(move |req: hyper::Request<Incoming>| {
                     let handler = handler.clone();
                     async move {
                         let ajaya_req = ajaya_core::Request::from_hyper(req);
@@ -85,7 +152,7 @@ impl Server {
                 });
 
                 if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection(io, service)
+                    .serve_connection(io, hyper_svc)
                     .await
                 {
                     tracing::error!("Connection error: {}", err);
@@ -94,23 +161,7 @@ impl Server {
         }
     }
 
-    /// Start serving HTTP requests using a [`MethodRouter`].
-    ///
-    /// The `MethodRouter` dispatches requests based on the HTTP method.
-    /// Returns `405 Method Not Allowed` for unregistered methods.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use ajaya_router::{get, post};
-    ///
-    /// async fn hello() -> &'static str { "Hello!" }
-    /// async fn create() -> &'static str { "Created!" }
-    ///
-    /// let router = get(hello).post(create);
-    /// let server = Server::bind("0.0.0.0:8080").await?;
-    /// server.serve_method_router(router).await?;
-    /// ```
+    /// Serve a [`MethodRouter`] (single path, method dispatch).
     pub async fn serve_method_router(
         self,
         router: MethodRouter,
@@ -120,14 +171,14 @@ impl Server {
         loop {
             let (stream, peer_addr) = self.listener.accept().await?;
             let io = TokioIo::new(stream);
-            let router = router.clone();
+            let router = Arc::clone(&router);
 
             tracing::debug!("Accepted connection from {}", peer_addr);
 
             tokio::task::spawn(async move {
-                let router = router.clone();
-                let service = service_fn(move |req: hyper::Request<Incoming>| {
-                    let router = router.clone();
+                let router = Arc::clone(&router);
+                let hyper_svc = service_fn(move |req: hyper::Request<Incoming>| {
+                    let router = Arc::clone(&router);
                     async move {
                         let ajaya_req = ajaya_core::Request::from_hyper(req);
                         let response = router.call(ajaya_req, ()).await;
@@ -136,62 +187,7 @@ impl Server {
                 });
 
                 if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection(io, service)
-                    .await
-                {
-                    tracing::error!("Connection error: {}", err);
-                }
-            });
-        }
-    }
-
-    /// Start serving HTTP requests using a [`Router`].
-    ///
-    /// The `Router` dispatches requests based on path and HTTP method.
-    /// Returns `404 Not Found` for unmatched paths and `405 Method Not Allowed`
-    /// for unmatched methods.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// use ajaya_router::{Router, get, post};
-    ///
-    /// async fn home() -> &'static str { "Home" }
-    /// async fn users() -> &'static str { "Users" }
-    ///
-    /// let app = Router::new()
-    ///     .route("/", get(home))
-    ///     .route("/users", get(users));
-    ///
-    /// let server = Server::bind("0.0.0.0:8080").await?;
-    /// server.serve_app(app).await?;
-    /// ```
-    pub async fn serve_app(
-        self,
-        router: Router,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let router = Arc::new(router);
-
-        loop {
-            let (stream, peer_addr) = self.listener.accept().await?;
-            let io = TokioIo::new(stream);
-            let router = router.clone();
-
-            tracing::debug!("Accepted connection from {}", peer_addr);
-
-            tokio::task::spawn(async move {
-                let router = router.clone();
-                let service = service_fn(move |req: hyper::Request<Incoming>| {
-                    let router = router.clone();
-                    async move {
-                        let ajaya_req = ajaya_core::Request::from_hyper(req);
-                        let response = router.call(ajaya_req, ()).await;
-                        Ok::<http::Response<Body>, hyper::Error>(response)
-                    }
-                });
-
-                if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection(io, service)
+                    .serve_connection(io, hyper_svc)
                     .await
                 {
                     tracing::error!("Connection error: {}", err);

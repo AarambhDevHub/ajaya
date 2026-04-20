@@ -5,15 +5,57 @@
 
 use ajaya::{
     AppendHeaders, Cookie, CookieJar, CookieKey, Error, ErrorResponse, FromRef, IntoResponse, Json,
-    Multipart, Path, Query, Router, SignedCookieJar, State, StreamBody, get, post, serve_app,
+    Multipart, Path, Query, Request, Response, Router, SignedCookieJar, State, StreamBody, get,
+    post, serve_app,
 };
 use bytes::Bytes;
 use futures_util::stream;
 use http::StatusCode;
 use http::header::CACHE_CONTROL;
 use serde::{Deserialize, Serialize};
-use std::io;
+use std::{convert::Infallible, io, pin::Pin};
+use tower_layer::Layer;
+use tower_service::Service;
 use tracing_subscriber::EnvFilter;
+
+#[derive(Clone)]
+struct RequestIdLayer;
+
+#[derive(Clone)]
+struct RequestIdService<S>(S);
+
+impl<S> Layer<S> for RequestIdLayer {
+    type Service = RequestIdService<S>;
+    fn layer(&self, inner: S) -> Self::Service {
+        RequestIdService(inner)
+    }
+}
+
+impl<S> Service<Request> for RequestIdService<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: ajaya::Request) -> Self::Future {
+        let id = uuid::Uuid::new_v4().to_string();
+        req.extensions_mut().insert(id);
+
+        let inner = self.0.clone();
+        let mut inner = std::mem::replace(&mut self.0, inner);
+        Box::pin(async move { inner.call(req).await })
+    }
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -238,7 +280,8 @@ async fn main() {
         .route("/get_user", get(get_user_cookie))
         .route("/files/{*path}", get(serve_file))
         .fallback(not_found)
-        .with_state(state);
+        .with_state(state)
+        .layer(RequestIdLayer);
 
     if let Err(e) = serve_app("0.0.0.0:8080", app).await {
         tracing::error!("Server error: {}", e);
