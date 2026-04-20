@@ -6,7 +6,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.2.6-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.1-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -17,7 +17,7 @@
 
 **Ajaya** (अजय, *"The Unconquerable"*) is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**. It aims to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> 🔱 **v0.3.4 — Extractor System Complete.** Ajaya now features a complete extractor system with type-safe Path, Query, Json, Form, State, Multipart, and 10+ more extractors. Handlers support up to 16 extractor parameters with compile-time safety. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> 🔱 **v0.4.1 — Middleware System** Ajaya now features Tower integration, CORS middleware, and more. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -177,7 +177,7 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | **0.1.x** | Routing System | ✅ Complete |
 | **0.2.x** | Extractors | ✅ Complete |
 | **0.3.x** | Responses & Error Handling | ✅ Complete |
-| 0.4.x | Middleware |  🚧 Next Up |
+| **0.4.x** | Middleware | 🚧 In Progress |
 | 0.5.x | WebSocket, SSE | ⏳ Planned |
 | 0.6.x | TLS, HTTP/2, Static Files | ⏳ Planned |
 | 0.7.x | Macros, Testing, Config | ⏳ Planned |

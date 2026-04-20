@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.1] — 2026-04-20 — CORS Middleware
+
+### Added
+- `ajaya_middleware::cors::CorsLayer` — full CORS spec implementation
+- `CorsLayer::new()` — base constructor (no origins configured by default)
+- `CorsLayer::permissive()` — allow all origins, methods, headers; no credentials
+- `CorsLayer::very_permissive()` — same but with credentials (mirrors origin)
+- Builder API: `.allow_origin()`, `.allow_methods()`, `.allow_headers()`, `.expose_headers()`, `.allow_credentials()`, `.max_age()`
+- Automatic preflight `OPTIONS` request handling → `204 No Content`
+- `Vary: Origin` header on all non-wildcard-origin responses
+- `IntoAllowOrigin` trait for ergonomic origin configuration
+- `ajaya::CorsLayer` re-export from facade crate
+- `ajaya-middleware` added as workspace dependency
+
+---
+
+## [0.4.0] — 2026-04-20 — Tower Integration
+
+### Added
+- `Router::layer(layer)` — apply a Tower `Layer` to **all** requests (including 404/405)
+- `Router::route_layer(layer)` — apply a Tower `Layer` to **matched routes only**
+- `MethodRouter::layer(layer)` — apply a Tower `Layer` to a specific route's handlers
+- `Router::into_service()` — convert `Router<()>` into a `BoxCloneService` with all layers baked in
+- `Server::serve_service(svc)` — serve any pre-built `BoxCloneService` directly
+- `serve_service(addr, svc)` — convenience free function for `serve_service`
+- `ajaya_router::layer::BoxCloneService` — our own type-erased, clone-friendly Tower service
+- `ajaya_router::layer::LayerFn` — `Arc<dyn Fn(BoxCloneService) -> BoxCloneService>` type alias
+- `ajaya_router::layer::into_layer_fn(layer)` — convert any Tower `Layer` into a `LayerFn`
+- `ajaya_router::layer::apply_layers(base, layers)` — apply a slice of `LayerFn` to a service
+- `ajaya_router::layer::oneshot(svc, req)` — poll-ready + call helper
+- `MethodRouter<S>: Clone` — required for route-layer composition
+- `ajaya::BoxCloneService` and `ajaya::LayerFn` re-exports
+
+### Changed
+- `serve_app` now calls `Router::into_service()` internally — all layers are applied automatically
+- `Server::serve_app` delegates to `Server::serve_service`
+- `ajaya-router/Cargo.toml`: added `tower-layer` dependency
+- `ajaya-hyper/Cargo.toml`: added `tower-service` dependency
+
+---
+
 ## [0.3.4] — 2026-04-20 — Error Handling Polish
 
 ### Added

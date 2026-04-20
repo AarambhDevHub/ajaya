@@ -19,4 +19,4 @@ http-body      = { workspace = true }
 http-body-util = { workspace = true }
 bytes          = { workspace = true }
 tracing        = { workspace = true }
-
+tower-service  = { workspace = true }

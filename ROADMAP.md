@@ -348,11 +348,11 @@
 ### `0.4.0` — Tower Integration
 **Goal:** First-class Tower `Layer` + `Service` support.
 
-- [ ] `Router::layer()` applies to all routes
-- [ ] `Router::route_layer()` applies to matched routes only
-- [ ] `MethodRouter::layer()` per-route layers
-- [ ] Layer ordering documentation (outermost first)
-- [ ] `ServiceBuilder` usage pattern documented in examples
+- [x] `Router::layer()` applies to all routes
+- [x] `Router::route_layer()` applies to matched routes only
+- [x] `MethodRouter::layer()` per-route layers
+- [x] Layer ordering documentation (outermost first)
+- [x] `ServiceBuilder` usage pattern documented in examples
 
 **Deliverable:** Any Tower middleware works with Ajaya routers.
 
@@ -361,13 +361,13 @@
 ### `0.4.1` — CORS Middleware
 **Goal:** Full CORS spec implementation.
 
-- [ ] `CorsLayer` with builder API
-- [ ] Allow origin: exact, list, any, predicate
-- [ ] Allow methods, allow headers, expose headers
-- [ ] Allow credentials, max age
-- [ ] Handle preflight `OPTIONS` requests automatically
-- [ ] `CorsLayer::permissive()` preset for development
-- [ ] `CorsLayer::very_permissive()` preset
+- [x] `CorsLayer` with builder API
+- [x] Allow origin: exact, list, any, predicate
+- [x] Allow methods, allow headers, expose headers
+- [x] Allow credentials, max age
+- [x] Handle preflight `OPTIONS` requests automatically
+- [x] `CorsLayer::permissive()` preset for development
+- [x] `CorsLayer::very_permissive()` preset
 
 **Deliverable:** Single-origin, multi-origin, and wildcard CORS all work correctly.
 

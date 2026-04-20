@@ -6,6 +6,7 @@
 //! - [`Router`] — Path-based HTTP router with radix trie lookup
 //! - [`MethodRouter`] — HTTP method-based dispatch for a single route
 //! - [`PathParams`] — Extracted path parameters from route matching
+//! - [`layer::BoxCloneService`] / [`layer::LayerFn`] — Tower integration primitives
 //! - Top-level constructor functions: [`get`], [`post`], [`put`], [`delete`], etc.
 //!
 //! ## Quick Start
@@ -22,6 +23,7 @@
 //!     .route("/users", get(list_users).post(create_user));
 //! ```
 
+pub mod layer;
 pub mod method_router;
 pub mod params;
 pub mod router;

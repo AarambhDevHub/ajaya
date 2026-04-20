@@ -3,22 +3,12 @@
 //! One-liners to start the Ajaya server.
 
 use ajaya_core::handler::Handler;
-use ajaya_router::MethodRouter;
-use ajaya_router::Router;
+use ajaya_router::layer::BoxCloneService;
+use ajaya_router::{MethodRouter, Router};
 
 use crate::Server;
 
-/// Start the Ajaya HTTP server on the given address with a handler.
-///
-/// This is a convenience wrapper around [`Server::bind`] and [`Server::serve`].
-///
-/// # Example
-///
-/// ```rust,ignore
-/// async fn hello() -> &'static str { "Hello!" }
-///
-/// ajaya_hyper::serve("0.0.0.0:8080", hello).await.unwrap();
-/// ```
+/// Start the server with a bare handler (no routing).
 pub async fn serve<H, T>(
     addr: &str,
     handler: H,
@@ -27,56 +17,34 @@ where
     H: Handler<T> + Clone + Send + Sync + 'static,
     T: 'static,
 {
-    let server = Server::bind(addr).await?;
-    server.serve(handler).await
+    Server::bind(addr).await?.serve(handler).await
 }
 
-/// Start the Ajaya HTTP server on the given address with a [`MethodRouter`].
-///
-/// Dispatches requests based on HTTP method. Returns `405 Method Not Allowed`
-/// for unregistered methods.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use ajaya_router::{get, post};
-///
-/// async fn hello() -> &'static str { "Hello!" }
-/// async fn create() -> &'static str { "Created!" }
-///
-/// let router = get(hello).post(create);
-/// ajaya_hyper::serve_router("0.0.0.0:8080", router).await.unwrap();
-/// ```
+/// Start the server with a [`MethodRouter`].
 pub async fn serve_router(
     addr: &str,
     router: MethodRouter,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let server = Server::bind(addr).await?;
-    server.serve_method_router(router).await
+    Server::bind(addr).await?.serve_method_router(router).await
 }
 
-/// Start the Ajaya HTTP server on the given address with a [`Router`].
+/// Start the server with a [`Router`] — the standard entry point.
 ///
-/// Dispatches requests based on path and HTTP method. Returns `404 Not Found`
-/// for unmatched paths and `405 Method Not Allowed` for unmatched methods.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use ajaya_router::{Router, get};
-///
-/// async fn home() -> &'static str { "Home" }
-/// async fn about() -> &'static str { "About" }
-///
-/// let app = Router::new()
-///     .route("/", get(home))
-///     .route("/about", get(about));
-/// ajaya_hyper::serve_app("0.0.0.0:8080", app).await.unwrap();
-/// ```
+/// Calls [`Router::into_service`] internally, so all `.layer()`,
+/// `.route_layer()`, and `.with_state()` configurations are applied.
 pub async fn serve_app(
     addr: &str,
     router: Router,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let server = Server::bind(addr).await?;
-    server.serve_app(router).await
+    Server::bind(addr).await?.serve_app(router).await
+}
+
+/// Start the server with a pre-built Tower [`BoxCloneService`].
+///
+/// Useful when you've manually composed middleware via `router.into_service()`.
+pub async fn serve_service(
+    addr: &str,
+    service: BoxCloneService,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    Server::bind(addr).await?.serve_service(service).await
 }

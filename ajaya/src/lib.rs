@@ -140,3 +140,11 @@ pub use ajaya_extract::rejection;
 // ---------------------------------------------------------------------------
 pub use ajaya_hyper::Server;
 pub use ajaya_hyper::{serve, serve_app, serve_router};
+
+// ---------------------------------------------------------------------------
+// Middleware  (0.4.x)
+// ---------------------------------------------------------------------------
+pub use ajaya_middleware::CorsLayer;
+
+// Tower layer / service primitives (for custom middleware authors)
+pub use ajaya_router::layer::{BoxCloneService, LayerFn};

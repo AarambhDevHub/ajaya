@@ -9,3 +9,9 @@ rust-version.workspace = true
 description = "Built-in middleware for the Ajaya web framework"
 
 [dependencies]
+ajaya-core    = { workspace = true }
+ajaya-router  = { workspace = true }    # for BoxCloneService + LayerFn types
+http          = { workspace = true }
+tower-service = { workspace = true }
+tower-layer   = { workspace = true }
+tracing       = { workspace = true }
