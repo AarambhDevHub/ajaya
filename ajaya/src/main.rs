@@ -3,14 +3,28 @@
 //! Entry point binary demonstrating path-based routing
 //! with parameters, extractors, and wildcards.
 
-use ajaya::{Error, Json, Multipart, Path, Query, Router, State, get, post, serve_app};
+use ajaya::{
+    AppendHeaders, Cookie, CookieJar, CookieKey, Error, ErrorResponse, FromRef, IntoResponse, Json,
+    Multipart, Path, Query, Router, SignedCookieJar, State, StreamBody, get, post, serve_app,
+};
+use bytes::Bytes;
+use futures_util::stream;
 use http::StatusCode;
+use http::header::CACHE_CONTROL;
 use serde::{Deserialize, Serialize};
+use std::io;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone)]
 struct AppState {
     app_name: String,
+    cookie_key: CookieKey,
+}
+
+impl FromRef<AppState> for CookieKey {
+    fn from_ref(state: &AppState) -> Self {
+        state.cookie_key.clone()
+    }
 }
 
 #[derive(Serialize)]
@@ -97,6 +111,82 @@ async fn not_found() -> (StatusCode, &'static str) {
     (StatusCode::NOT_FOUND, "🔱 Ajaya: Page not found")
 }
 
+/// GET /stream — Streaming a large file
+async fn stream_data() -> StreamBody<impl futures_util::Stream<Item = Result<Bytes, io::Error>>> {
+    // In real code: tokio_util::io::ReaderStream::new(file)
+    let chunks = stream::iter(vec![
+        Ok(Bytes::from("chunk 1 ")),
+        Ok(Bytes::from("chunk 2")),
+    ]);
+    StreamBody::new(chunks)
+}
+
+/// GET /cached — Appending headers
+async fn cached_data() -> impl IntoResponse {
+    (
+        AppendHeaders([(CACHE_CONTROL, "public, max-age=3600")]),
+        Json(serde_json::json!({ "data": "cached value" })),
+    )
+}
+
+/// POST /login — Cookie session login
+async fn login(jar: CookieJar) -> (CookieJar, &'static str) {
+    let jar = jar.add(
+        Cookie::build(("session", "s3cr3t"))
+            .http_only(true)
+            .secure(true)
+            .same_site(cookie::SameSite::Strict)
+            .build(),
+    );
+    (jar, "Logged in!")
+}
+
+/// POST /logout — Cookie session logout
+async fn logout(jar: CookieJar) -> (CookieJar, &'static str) {
+    let jar = jar.remove(Cookie::from("session"));
+    (jar, "Logged out!")
+}
+
+/// POST /set_user — Signed cookie with app state
+async fn set_user(jar: SignedCookieJar) -> (SignedCookieJar, &'static str) {
+    let jar = jar.add(Cookie::new("user_id", "42"));
+    (jar, "User cookie signed and set!")
+}
+
+/// GET /get_user — Signed cookie with app state
+async fn get_user_cookie(jar: SignedCookieJar) -> String {
+    jar.get("user_id")
+        .map(|c| format!("user_id={}", c.value()))
+        .unwrap_or_else(|| "no session".into())
+}
+
+/// Structured error responses
+#[derive(Debug)]
+enum _AppError {
+    NotFound(String),
+    Unauthorized,
+    Internal(Box<dyn std::error::Error + Send + Sync>),
+}
+
+impl IntoResponse for _AppError {
+    fn into_response(self) -> ajaya::Response {
+        match self {
+            _AppError::NotFound(msg) => ErrorResponse::new(StatusCode::NOT_FOUND)
+                .message(msg)
+                .into_response(),
+            _AppError::Unauthorized => ErrorResponse::new(StatusCode::UNAUTHORIZED)
+                .message("Unauthorized")
+                .into_response(),
+            _AppError::Internal(e) => {
+                tracing::error!("Internal error: {e}");
+                ErrorResponse::new(StatusCode::INTERNAL_SERVER_ERROR)
+                    .message("Internal server error")
+                    .into_response()
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -131,6 +221,7 @@ async fn main() {
 
     let state = AppState {
         app_name: "Ajaya Framework (v0.2.6)".to_string(),
+        cookie_key: CookieKey::generate(),
     };
 
     let app = Router::new()
@@ -139,6 +230,12 @@ async fn main() {
         .route("/users", get(list_users).post(create_user))
         .route("/users/{id}", get(get_user))
         .route("/upload", post(upload))
+        .route("/stream", get(stream_data))
+        .route("/cached", get(cached_data))
+        .route("/login", post(login))
+        .route("/logout", post(logout))
+        .route("/set_user", post(set_user))
+        .route("/get_user", get(get_user_cookie))
         .route("/files/{*path}", get(serve_file))
         .fallback(not_found)
         .with_state(state);

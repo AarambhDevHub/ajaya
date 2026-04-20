@@ -9,6 +9,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.4] — 2026-04-20 — Error Handling Polish
+
+### Added
+- `ErrorResponse` builder — produces standardised JSON error bodies
+  `{ "error": "...", "code": 404, "request_id": "..." (optional) }`
+- `ErrorResponse::request_id()` — attach a tracing ID (ready for 0.4.x RequestIdLayer)
+- `impl From<Box<dyn Error + Send + Sync>> for Error`
+- `Error::inner()` — access the wrapped error for logging
+
+### Changed
+- `Error::into_response()` now delegates to `ErrorResponse` for consistent formatting
+
+---
+
+## [0.3.3] — 2026-04-20 — Cookie Support
+
+### Added
+- `CookieJar` extractor — reads `Cookie` header, writes `Set-Cookie` via `IntoResponseParts`
+- `SignedCookieJar` — HMAC-SHA256 signed cookies, requires `cookie::Key` in app state
+- `PrivateCookieJar` — AES-256-GCM encrypted + authenticated cookies
+- All three implement both `FromRequestParts<S>` and `IntoResponseParts`
+- `cookie::Key` re-exported as `ajaya::CookieKey`
+- `cookie::Cookie` re-exported as `ajaya::Cookie`
+- `cookie = "0.18"` added to workspace dependencies
+
+---
+
+## [0.3.2] — 2026-04-20 — IntoResponseParts
+
+### Added
+- `IntoResponseParts` trait — append headers to a response without touching the body
+- `ResponseParts` — accumulates extra headers during tuple processing
+- `AppendHeaders<I>` — append any iterator of `(HeaderName, HeaderValue)` pairs
+- `impl IntoResponseParts for http::HeaderMap`
+- `(impl IntoResponseParts, impl IntoResponse): IntoResponse`
+- `(P1, P2, impl IntoResponse): IntoResponse` — two header sets + body
+
+---
+
+## [0.3.1] — 2026-04-20 — Streaming Responses
+
+### Added
+- `StreamBody<S>` — zero-copy streaming body backed by `Stream<Item = Result<Bytes, E>>`
+- `Body::from_stream()` — create a `Body` directly from any compatible stream
+- `impl IntoResponse for StreamBody<S>` — return a stream directly from handlers
+
+---
+
+## [0.3.0] — 2026-04-20 — Response System Enhancements
+
+### Added
+- `impl IntoResponse for (http::HeaderMap, T)` — set arbitrary response headers
+- `impl IntoResponse for (StatusCode, http::HeaderMap, T)` — status + headers + body
+
+---
+
 ## [0.2.6] — 2026-04-16 — Multipart Extractor
 
 ### Added
