@@ -24,3 +24,4 @@ thiserror        = { workspace = true }
 multer           = { workspace = true }
 headers          = { workspace = true }
 futures-util     = { workspace = true }
+cookie           = { workspace = true }

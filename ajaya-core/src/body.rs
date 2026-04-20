@@ -79,6 +79,31 @@ impl Body {
         let bytes = self.to_bytes().await?;
         String::from_utf8(bytes.to_vec()).map_err(|e| Box::new(e) as BoxError)
     }
+
+    /// Create a `Body` from a `Stream<Item = Result<Bytes, E>>`.
+    ///
+    /// Useful for streaming large responses without buffering them in memory.
+    /// The stream must be `Unpin`; wrap non-Unpin streams with `Box::pin`.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use bytes::Bytes;
+    /// use futures_util::stream;
+    ///
+    /// let chunks = stream::iter(vec![
+    ///     Ok::<_, std::io::Error>(Bytes::from("Hello ")),
+    ///     Ok(Bytes::from("world!")),
+    /// ]);
+    /// let body = Body::from_stream(chunks);
+    /// ```
+    pub fn from_stream<S, E>(stream: S) -> Self
+    where
+        S: futures_util::Stream<Item = Result<Bytes, E>> + Send + Unpin + 'static,
+        E: Into<BoxError>,
+    {
+        Self::new(StreamBodyInner { stream })
+    }
 }
 
 impl http_body::Body for Body {
@@ -110,6 +135,34 @@ impl Default for Body {
 impl std::fmt::Debug for Body {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Body").finish()
+    }
+}
+
+/// Internal adapter: wraps a stream as an `http_body::Body`.
+struct StreamBodyInner<S> {
+    stream: S,
+}
+
+impl<S, E> http_body::Body for StreamBodyInner<S>
+where
+    S: futures_util::Stream<Item = Result<Bytes, E>> + Unpin,
+    E: Into<BoxError>,
+{
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
+        match std::pin::Pin::new(&mut self.stream).poll_next(cx) {
+            std::task::Poll::Ready(Some(Ok(bytes))) => {
+                std::task::Poll::Ready(Some(Ok(http_body::Frame::data(bytes))))
+            }
+            std::task::Poll::Ready(Some(Err(e))) => std::task::Poll::Ready(Some(Err(e.into()))),
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
     }
 }
 

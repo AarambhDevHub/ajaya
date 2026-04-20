@@ -37,6 +37,7 @@
 pub mod body;
 pub mod bytes_extract;
 pub mod connect_info;
+pub mod cookies;
 pub mod extension;
 pub mod form;
 pub mod header_map;
@@ -57,6 +58,7 @@ pub mod uri;
 // Re-export extractor types
 pub use self::body::BodyExtractor;
 pub use self::connect_info::ConnectInfo;
+pub use self::cookies::{CookieJar, PrivateCookieJar, SignedCookieJar}; // 0.3.3
 pub use self::extension::Extension;
 pub use self::form::Form;
 pub use self::json::Json;

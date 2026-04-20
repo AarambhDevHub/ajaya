@@ -63,6 +63,7 @@
 // ---------------------------------------------------------------------------
 pub use ajaya_core::Body;
 pub use ajaya_core::Error;
+pub use ajaya_core::ErrorResponse;
 pub use ajaya_core::Handler;
 pub use ajaya_core::Html;
 pub use ajaya_core::IntoResponse;
@@ -72,6 +73,12 @@ pub use ajaya_core::Request;
 pub use ajaya_core::RequestParts;
 pub use ajaya_core::Response;
 pub use ajaya_core::ResponseBuilder;
+pub use ajaya_core::StreamBody;
+
+// IntoResponseParts system
+pub use ajaya_core::AppendHeaders; // 0.3.2
+pub use ajaya_core::IntoResponseParts; // 0.3.2
+pub use ajaya_core::ResponseParts; // 0.3.2
 
 // Extractor traits
 pub use ajaya_core::FromRequest;
@@ -111,6 +118,14 @@ pub use ajaya_extract::Json;
 // State
 pub use ajaya_extract::FromRef;
 pub use ajaya_extract::State;
+
+// Cookies  ← 0.3.3
+pub use ajaya_extract::CookieJar;
+pub use ajaya_extract::PrivateCookieJar;
+pub use ajaya_extract::SignedCookieJar;
+// Re-export cookie::Key so users don't need a direct cookie dep
+pub use cookie::Cookie;
+pub use cookie::Key as CookieKey;
 
 // Multipart
 pub use ajaya_extract::Field;

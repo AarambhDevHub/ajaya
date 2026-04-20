@@ -281,12 +281,12 @@
 ### `0.3.0` — Response Builder & Helpers
 **Goal:** Ergonomic response construction.
 
-- [ ] `ResponseBuilder` with `.status()`, `.header()`, `.body()`, `.json()`, `.html()`, `.text()`
-- [ ] `Json<T: Serialize>` response type
-- [ ] `Html<T: Into<String>>` response type
-- [ ] `Redirect::to()`, `Redirect::permanent()`, `Redirect::temporary()`
-- [ ] `StatusCode` alone as response (empty body)
-- [ ] Tuple impls: `(StatusCode, impl IntoResponse)`, `(HeaderMap, impl IntoResponse)`, `(StatusCode, HeaderMap, impl IntoResponse)`
+- [x] `ResponseBuilder` with `.status()`, `.header()`, `.body()`, `.json()`, `.html()`, `.text()`
+- [x] `Json<T: Serialize>` response type
+- [x] `Html<T: Into<String>>` response type
+- [x] `Redirect::to()`, `Redirect::permanent()`, `Redirect::temporary()`
+- [x] `StatusCode` alone as response (empty body)
+- [x] Tuple impls: `(StatusCode, impl IntoResponse)`, `(HeaderMap, impl IntoResponse)`, `(StatusCode, HeaderMap, impl IntoResponse)`
 
 **Deliverable:** All common response patterns work without boilerplate.
 
@@ -295,10 +295,10 @@
 ### `0.3.1` — Streaming Responses
 **Goal:** Stream response bodies.
 
-- [ ] `StreamBody<S>` — wraps `Stream<Item = Result<Bytes, E>>` as response body
-- [ ] `Body::from_stream()` constructor
-- [ ] Proper `Transfer-Encoding: chunked` for HTTP/1.1 streamed responses
-- [ ] Backpressure: don't buffer full response in memory
+- [x] `StreamBody<S>` — wraps `Stream<Item = Result<Bytes, E>>` as response body
+- [x] `Body::from_stream()` constructor
+- [x] Proper `Transfer-Encoding: chunked` for HTTP/1.1 streamed responses
+- [x] Backpressure: don't buffer full response in memory
 
 **Deliverable:** Stream large files / generated data without memory bloat.
 
@@ -307,11 +307,11 @@
 ### `0.3.2` — IntoResponseParts
 **Goal:** Append headers/cookies without losing body type.
 
-- [ ] `IntoResponseParts` trait
-- [ ] `ResponseParts` builder accumulates extra headers
-- [ ] `(impl IntoResponseParts, impl IntoResponse)` tuple impl
-- [ ] Multiple parts: `(part1, part2, impl IntoResponse)`
-- [ ] `AppendHeaders<I>` — append multiple headers at once
+- [x] `IntoResponseParts` trait
+- [x] `ResponseParts` builder accumulates extra headers
+- [x] `(impl IntoResponseParts, impl IntoResponse)` tuple impl
+- [x] Multiple parts: `(part1, part2, impl IntoResponse)`
+- [x] `AppendHeaders<I>` — append multiple headers at once
 
 **Deliverable:** Return cookies + JSON body as a single tuple without fighting types.
 
@@ -320,12 +320,12 @@
 ### `0.3.3` — Cookie Support
 **Goal:** Read and write cookies.
 
-- [ ] `CookieJar` extractor — reads cookies from `Cookie` header
-- [ ] `CookieJar` as `IntoResponseParts` — sets `Set-Cookie` headers
-- [ ] `SignedCookieJar` — HMAC-signed cookies (tamper-proof)
-- [ ] `PrivateCookieJar` — encrypted cookies (tamper-proof + confidential)
-- [ ] `Key` type for signing/encryption
-- [ ] Cookie builder: `.path()`, `.domain()`, `.max_age()`, `.secure()`, `.http_only()`, `.same_site()`
+- [x] `CookieJar` extractor — reads cookies from `Cookie` header
+- [x] `CookieJar` as `IntoResponseParts` — sets `Set-Cookie` headers
+- [x] `SignedCookieJar` — HMAC-signed cookies (tamper-proof)
+- [x] `PrivateCookieJar` — encrypted cookies (tamper-proof + confidential)
+- [x] `Key` type for signing/encryption
+- [x] Cookie builder: `.path()`, `.domain()`, `.max_age()`, `.secure()`, `.http_only()`, `.same_site()`
 
 **Deliverable:** Sessions via encrypted cookies, no external session store needed.
 
@@ -334,10 +334,10 @@
 ### `0.3.4` — Error Handling Polish
 **Goal:** Complete error handling system.
 
-- [ ] `HandleErrorLayer` — convert `BoxError` (from Tower layers) into responses
-- [ ] `ajaya::error::ErrorResponse` — standard JSON error body `{ error, code, request_id }`
-- [ ] Map rejection types to custom error responses
-- [ ] `IntoResponse` for `anyhow::Error` (behind feature flag)
+- [x] `HandleErrorLayer` — convert `BoxError` (from Tower layers) into responses
+- [x] `ajaya::error::ErrorResponse` — standard JSON error body `{ error, code, request_id }`
+- [x] Map rejection types to custom error responses
+- [x] `IntoResponse` for `anyhow::Error` (behind feature flag)
 
 **Deliverable:** Timeout errors, body limit errors all return proper JSON responses.
 

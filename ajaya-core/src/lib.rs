@@ -22,18 +22,22 @@ pub mod error;
 pub mod extract;
 pub mod handler;
 pub mod into_response;
+pub mod into_response_parts;
 pub mod method_filter;
 pub mod request;
 pub mod request_parts;
 pub mod response;
+pub mod stream_body;
 
 // Re-exports
 pub use body::Body;
-pub use error::Error;
+pub use error::{Error, ErrorResponse};
 pub use extract::{FromRequest, FromRequestParts};
 pub use handler::Handler;
 pub use into_response::{Html, IntoResponse, Json};
+pub use into_response_parts::{AppendHeaders, IntoResponseParts, ResponseParts};
 pub use method_filter::MethodFilter;
 pub use request::Request;
 pub use request_parts::RequestParts;
 pub use response::{Redirect, Response, ResponseBuilder};
+pub use stream_body::StreamBody;
