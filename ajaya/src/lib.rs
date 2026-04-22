@@ -146,5 +146,42 @@ pub use ajaya_hyper::{serve, serve_app, serve_router};
 // ---------------------------------------------------------------------------
 pub use ajaya_middleware::CorsLayer;
 
+/// Function-based middleware and request/response transformers.
+///
+/// This module exposes everything you need to write middleware as plain
+/// async functions — no `Service` or `Layer` trait implementations needed.
+///
+/// Any [`FromRequestParts`] extractor can be used as a middleware parameter,
+/// including [`CookieJar`], [`TypedHeader`], [`Path`], [`Query`],
+/// [`Extension`], [`State`], [`SignedCookieJar`], and all HTTP metadata types.
+///
+/// # Quick reference
+///
+/// | Function | Use case |
+/// |---|---|
+/// | [`from_fn`] | Middleware with extractors, no shared state |
+/// | [`from_fn_with_state`] | Middleware with extractors + shared app state |
+/// | [`map_request`] | Transform the incoming request only |
+/// | [`map_request_with_state`] | Transform request with state access |
+/// | [`map_response`] | Transform the outgoing response only |
+/// | [`map_response_with_state`] | Transform response with state access |
+///
+/// See [`ajaya_middleware::from_fn`] for detailed documentation and examples.
+pub mod middleware {
+    pub use ajaya_middleware::{
+        from_fn::{FromFnLayer, FromFnService, from_fn, from_fn_with_state},
+        map_request::{
+            MapRequestLayer, MapRequestService, MapRequestWithStateLayer,
+            MapRequestWithStateService, map_request, map_request_with_state,
+        },
+        map_response::{
+            MapResponseLayer, MapResponseService, MapResponseWithStateLayer,
+            MapResponseWithStateService, map_response, map_response_with_state,
+        },
+        middleware_fn::MiddlewareFn,
+        next::Next,
+    };
+}
+
 // Tower layer / service primitives (for custom middleware authors)
 pub use ajaya_router::layer::{BoxCloneService, LayerFn};
