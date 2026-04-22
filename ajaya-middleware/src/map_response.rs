@@ -88,7 +88,8 @@ where
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn std::future::Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future =
+        Pin<Box<dyn std::future::Future<Output = Result<Response, Infallible>> + Send + 'static>>;
 
     #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -190,7 +191,8 @@ where
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn std::future::Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future =
+        Pin<Box<dyn std::future::Future<Output = Result<Response, Infallible>> + Send + 'static>>;
 
     #[inline]
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

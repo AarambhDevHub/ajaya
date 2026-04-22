@@ -247,7 +247,10 @@ impl<F, S, T, Svc> Layer<Svc> for FromFnLayer<F, S, T>
 where
     F: MiddlewareFn<S, T>,
     S: Clone + Send + Sync + 'static,
-    Svc: Service<Request, Response = Response, Error = std::convert::Infallible> + Clone + Send + 'static,
+    Svc: Service<Request, Response = Response, Error = std::convert::Infallible>
+        + Clone
+        + Send
+        + 'static,
     Svc::Future: Send + 'static,
 {
     type Service = FromFnService<F, S, Svc, T>;
@@ -300,15 +303,23 @@ impl<F, S, Svc, T> Service<Request> for FromFnService<F, S, Svc, T>
 where
     F: MiddlewareFn<S, T>,
     S: Clone + Send + Sync + 'static,
-    Svc: Service<Request, Response = Response, Error = std::convert::Infallible> + Clone + Send + 'static,
+    Svc: Service<Request, Response = Response, Error = std::convert::Infallible>
+        + Clone
+        + Send
+        + 'static,
     Svc::Future: Send + 'static,
 {
     type Response = Response;
     type Error = std::convert::Infallible;
-    type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, Self::Error>> + Send + 'static>>;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Response, Self::Error>> + Send + 'static>,
+    >;
 
     #[inline]
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
