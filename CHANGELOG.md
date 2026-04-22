@@ -12,6 +12,142 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.1] — 2026-04-20 — CORS Middleware
 
 ### Added
+
+- **`from_fn(f)`** — create Tower-compatible middleware from a plain async function.
+  No `Service` or `Layer` trait implementations needed.
+
+  ```rust
+  // Before (v0.4.1): ~35 lines of Service + Layer boilerplate
+  // After  (v0.4.2): 4 lines
+  async fn log_requests(req: Request, next: Next) -> Response {
+      let path = req.uri().path().to_string();
+      let res  = next.run(req).await;
+      tracing::info!("{} → {}", path, res.status());
+      res
+  }
+  Router::new().layer(from_fn(log_requests));
+  ```
+
+- **`from_fn_with_state(state, f)`** — stateful middleware; the state is cloned
+  once per request. Replaces the need for `Arc`-wrapped service structs.
+
+  ```rust
+  async fn require_api_key(state: AppState, req: Request, next: Next) -> impl IntoResponse {
+      if req.headers().get("x-api-key").and_then(|v| v.to_str().ok())
+          == Some(state.api_key.as_str())
+      {
+          next.run(req).await
+      } else {
+          StatusCode::UNAUTHORIZED.into_response()
+      }
+  }
+  Router::new().layer(from_fn_with_state(my_state, require_api_key));
+  ```
+
+- **`Next`** — represents the remaining middleware + handler chain. Call
+  `next.run(req)` to proceed. Short-circuit by returning early without calling it.
+
+- **`map_request(f)`** — lightweight middleware that transforms only the request.
+  More efficient than `from_fn` when no response mutation is needed.
+
+  ```rust
+  Router::new().layer(map_request(|mut req: Request| async move {
+      req.headers_mut().insert("x-request-source", "ajaya".parse().unwrap());
+      req
+  }));
+  ```
+
+- **`map_response(f)`** — lightweight middleware that transforms only the response.
+
+  ```rust
+  Router::new().layer(map_response(|mut res: Response| async move {
+      res.headers_mut().insert("x-powered-by", "ajaya".parse().unwrap());
+      res
+  }));
+  ```
+
+- **`ajaya::middleware` module** — all four helpers + `Next` are re-exported
+  under `ajaya::middleware` in the facade crate. Import pattern:
+  `use ajaya::middleware::{from_fn, from_fn_with_state, map_request, map_response, Next};`
+
+- `ajaya-middleware/src/from_fn.rs` — new module implementing all four types
+  and their Tower `Layer` + `Service` impls.
+
+### Changed
+
+- `ajaya/src/main.rs` — `RequestIdLayer` (35-line Tower boilerplate) replaced with
+  a 4-line `from_fn(attach_request_id)` middleware. Also added `count_requests`
+  (stateful, using `from_fn_with_state`) and `add_powered_by_header` (`map_response`)
+  to demonstrate the full middleware DSL.
+
+- `ajaya-middleware/src/lib.rs` — updated module table, added `from_fn` exports.
+
+- `ajaya/src/lib.rs` — added `pub mod middleware` with all helper re-exports,
+  added doc comment explaining the new middleware API.
+
+- `ajaya-middleware/src/from_fn.rs` — **refactored** from a single 1103-line file
+  into a modular structure for better maintainability:
+
+  - `src/next.rs` — `Next` struct (handle to remaining middleware chain)
+  - `src/middleware_fn.rs` — `MiddlewareFn` trait + blanket impls for 0–16 extractors
+  - `src/from_fn.rs` — `from_fn`, `from_fn_with_state`, `FromFnLayer`, `FromFnService`
+  - `src/map_request.rs` — `map_request`, `map_request_with_state` + Layer/Service types
+  - `src/map_response.rs` — `map_response`, `map_response_with_state` + Layer/Service types
+
+  All modules include `//!` module-level doc comments matching the original documentation style.
+
+### Migration Guide
+
+If you wrote a custom middleware using the old Tower boilerplate:
+
+```rust
+// OLD — v0.4.1
+#[derive(Clone)]
+struct MyLayer;
+#[derive(Clone)]
+struct MyService<S>(S);
+
+impl<S> Layer<S> for MyLayer {
+    type Service = MyService<S>;
+    fn layer(&self, inner: S) -> Self::Service { MyService(inner) }
+}
+
+impl<S> Service<Request> for MyService<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.0.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let cloned = self.0.clone();
+        let mut inner = std::mem::replace(&mut self.0, cloned);
+        Box::pin(async move {
+            // your logic here
+            inner.call(req).await
+        })
+    }
+}
+```
+
+```rust
+// NEW — v0.4.1
+use ajaya::middleware::{from_fn, Next};
+
+async fn my_middleware(req: Request, next: Next) -> Response {
+    // your logic here
+    next.run(req).await
+}
+Router::new().layer(from_fn(my_middleware));
+```
+
+### Added
 - `ajaya_middleware::cors::CorsLayer` — full CORS spec implementation
 - `CorsLayer::new()` — base constructor (no origins configured by default)
 - `CorsLayer::permissive()` — allow all origins, methods, headers; no credentials
