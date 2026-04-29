@@ -144,7 +144,6 @@ pub use ajaya_hyper::{serve, serve_app, serve_router};
 // ---------------------------------------------------------------------------
 // Middleware  (0.4.x)
 // ---------------------------------------------------------------------------
-pub use ajaya_middleware::CorsLayer;
 
 /// Function-based middleware and request/response transformers.
 ///
@@ -169,7 +168,13 @@ pub use ajaya_middleware::CorsLayer;
 /// See [`ajaya_middleware::from_fn`] for detailed documentation and examples.
 pub mod middleware {
     pub use ajaya_middleware::{
+        auth::RequireAuthorizationLayer,
+        body_limit::RequestBodyLimitLayer,
+        catch_panic::CatchPanicLayer,
+        compression::{CompressionLayer, CompressionLevel, DecompressionLayer},
+        csrf::{CsrfLayer, CsrfToken},
         from_fn::{FromFnLayer, FromFnService, from_fn, from_fn_with_state},
+        map_body::{MapRequestBodyLayer, MapResponseBodyLayer},
         map_request::{
             MapRequestLayer, MapRequestService, MapRequestWithStateLayer,
             MapRequestWithStateService, map_request, map_request_with_state,
@@ -180,8 +185,33 @@ pub mod middleware {
         },
         middleware_fn::MiddlewareFn,
         next::Next,
+        rate_limit::{KeyExtractor, RateLimitLayer},
+        request_id::{PropagateRequestIdLayer, RequestId, RequestIdLayer},
+        security_headers::{
+            SecurityHeadersLayer, SensitiveHeadersLayer, SetRequestHeaderLayer,
+            SetResponseHeaderLayer,
+        },
+        timeout::TimeoutLayer,
+        trace::{DefaultMakeSpan, LatencyUnit, TraceLayer},
     };
 }
+
+// ── Top-level convenience re-exports ─────────────────────────────────────────
+// Add at the top-level of lib.rs (outside the middleware module):
+pub use ajaya_middleware::CorsLayer;
+pub use ajaya_middleware::auth::RequireAuthorizationLayer;
+pub use ajaya_middleware::body_limit::RequestBodyLimitLayer;
+pub use ajaya_middleware::catch_panic::CatchPanicLayer;
+pub use ajaya_middleware::compression::{CompressionLayer, CompressionLevel, DecompressionLayer};
+pub use ajaya_middleware::csrf::{CsrfLayer, CsrfToken};
+pub use ajaya_middleware::map_body::{MapRequestBodyLayer, MapResponseBodyLayer};
+pub use ajaya_middleware::rate_limit::{KeyExtractor, RateLimitLayer};
+pub use ajaya_middleware::request_id::{PropagateRequestIdLayer, RequestId, RequestIdLayer};
+pub use ajaya_middleware::security_headers::{
+    SecurityHeadersLayer, SensitiveHeadersLayer, SetRequestHeaderLayer, SetResponseHeaderLayer,
+};
+pub use ajaya_middleware::timeout::TimeoutLayer;
+pub use ajaya_middleware::trace::{DefaultMakeSpan, LatencyUnit, TraceLayer};
 
 // Tower layer / service primitives (for custom middleware authors)
 pub use ajaya_router::layer::{BoxCloneService, LayerFn};

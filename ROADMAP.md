@@ -376,12 +376,12 @@
 ### `0.4.2` — Compression & Decompression
 **Goal:** Transparent body compression.
 
-- [ ] `CompressionLayer` — compress response based on `Accept-Encoding`
-- [ ] Supports: gzip, brotli, zstd, deflate
-- [ ] `CompressionLevel` — default, fastest, best
-- [ ] `DecompressionLayer` — decompress request bodies
-- [ ] Skip compression for small bodies (< 1KB)
-- [ ] Skip compression for already-compressed content types
+- [x] `CompressionLayer` — compress response based on `Accept-Encoding`
+- [x] Supports: gzip, brotli, zstd, deflate
+- [x] `CompressionLevel` — default, fastest, best
+- [x] `DecompressionLayer` — decompress request bodies
+- [x] Skip compression for small bodies (< 1KB)
+- [x] Skip compression for already-compressed content types
 
 **Deliverable:** gzip/br compression on all responses automatically.
 
@@ -390,10 +390,10 @@
 ### `0.4.3` — Timeout Middleware
 **Goal:** Request timeout enforcement.
 
-- [ ] `TimeoutLayer::new(Duration)` — wraps Tower's timeout
-- [ ] Returns `408 Request Timeout` automatically
-- [ ] Per-route timeout via `MethodRouter::layer(TimeoutLayer::new(...))`
-- [ ] Graceful: in-flight responses complete, new requests rejected during shutdown
+- [x] `TimeoutLayer::new(Duration)` — wraps Tower's timeout
+- [x] Returns `408 Request Timeout` automatically
+- [x] Per-route timeout via `MethodRouter::layer(TimeoutLayer::new(...))`
+- [x] Graceful: in-flight responses complete, new requests rejected during shutdown
 
 **Deliverable:** Every route has a configurable timeout.
 
@@ -402,11 +402,11 @@
 ### `0.4.4` — Request ID Middleware
 **Goal:** Unique ID per request for tracing.
 
-- [ ] `RequestIdLayer` — generates UUID v4, inserts as `x-request-id` header
-- [ ] `PropagateRequestIdLayer` — forwards incoming `x-request-id` to response
-- [ ] Configurable header name
-- [ ] Custom ID generator (pluggable)
-- [ ] Available as `Extension<RequestId>` in handlers
+- [x] `RequestIdLayer` — generates UUID v4, inserts as `x-request-id` header
+- [x] `PropagateRequestIdLayer` — forwards incoming `x-request-id` to response
+- [x] Configurable header name
+- [x] Custom ID generator (pluggable)
+- [x] Available as `Extension<RequestId>` in handlers
 
 **Deliverable:** Every request has a unique traceable ID.
 
@@ -415,12 +415,12 @@
 ### `0.4.5` — Tracing Middleware
 **Goal:** Structured request/response logging via `tracing`.
 
-- [ ] `TraceLayer::new_for_http()`
-- [ ] Span per request: method, path, status, latency
-- [ ] Configurable `make_span_with`, `on_request`, `on_response`, `on_failure`
-- [ ] `DefaultMakeSpan`, `DefaultOnRequest`, `DefaultOnResponse`, `DefaultOnFailure`
-- [ ] Log level: INFO for success, WARN for 4xx, ERROR for 5xx
-- [ ] Latency units: millis, micros, seconds
+- [x] `TraceLayer::new_for_http()`
+- [x] Span per request: method, path, status, latency
+- [x] Configurable `make_span_with`, `on_request`, `on_response`, `on_failure`
+- [x] `DefaultMakeSpan`, `DefaultOnRequest`, `DefaultOnResponse`, `DefaultOnFailure`
+- [x] Log level: INFO for success, WARN for 4xx, ERROR for 5xx
+- [x] Latency units: millis, micros, seconds
 
 **Deliverable:** Every request logs method + path + status + latency as structured tracing span.
 
@@ -429,10 +429,10 @@
 ### `0.4.6` — Security Header Middleware
 **Goal:** HTTP security headers out of the box.
 
-- [ ] `SensitiveHeadersLayer` — redacts headers in traces/logs
-- [ ] `SetResponseHeaderLayer` — set/override/append response headers
-- [ ] `SetRequestHeaderLayer` — set/override/append request headers
-- [ ] `SecurityHeadersLayer` — full suite: `X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`, `Content-Security-Policy`, `Referrer-Policy`
+- [x] `SensitiveHeadersLayer` — redacts headers in traces/logs
+- [x] `SetResponseHeaderLayer` — set/override/append response headers
+- [x] `SetRequestHeaderLayer` — set/override/append request headers
+- [x] `SecurityHeadersLayer` — full suite: `X-Frame-Options`, `X-Content-Type-Options`, `Strict-Transport-Security`, `Content-Security-Policy`, `Referrer-Policy`
 
 **Deliverable:** One layer call adds all OWASP-recommended security headers.
 
@@ -441,11 +441,11 @@
 ### `0.4.7` — Rate Limiting Middleware
 **Goal:** Protect endpoints from abuse.
 
-- [ ] `RateLimitLayer::new(count, duration)` — token bucket per IP
-- [ ] Sliding window algorithm option
-- [ ] Key extractor: IP, API key, user ID (custom closure)
-- [ ] Returns `429 Too Many Requests` with `Retry-After` header
-- [ ] In-memory store (default) + Redis backend (feature flag)
+- [x] `RateLimitLayer::new(count, duration)` — token bucket per IP
+- [x] Sliding window algorithm option
+- [x] Key extractor: IP, API key, user ID (custom closure)
+- [x] Returns `429 Too Many Requests` with `Retry-After` header
+- [x] In-memory store (default) + Redis backend (feature flag)
 
 **Deliverable:** 100 req/sec per IP limit on any route with one `.layer()` call.
 
@@ -454,11 +454,11 @@
 ### `0.4.8` — Auth Middleware
 **Goal:** Authentication enforcement layer.
 
-- [ ] `RequireAuthorizationLayer::bearer(token)` — static bearer token
-- [ ] `RequireAuthorizationLayer::basic(user, pass)` — HTTP Basic
-- [ ] `RequireAuthorizationLayer::custom(async_fn)` — custom async validator
-- [ ] Returns `401 Unauthorized` with `WWW-Authenticate` header
-- [ ] JWT validation (feature = "jwt"): `JwtLayer::new(secret)`
+- [x] `RequireAuthorizationLayer::bearer(token)` — static bearer token
+- [x] `RequireAuthorizationLayer::basic(user, pass)` — HTTP Basic
+- [x] `RequireAuthorizationLayer::custom(async_fn)` — custom async validator
+- [x] Returns `401 Unauthorized` with `WWW-Authenticate` header
+- [x] JWT validation (feature = "jwt"): `JwtLayer::new(secret)`
 
 **Deliverable:** Protect admin routes with one middleware line.
 
@@ -467,11 +467,11 @@
 ### `0.4.9` — Body & Panic Middleware
 **Goal:** Safety middleware.
 
-- [ ] `RequestBodyLimitLayer::new(bytes)` — limit request body size
-- [ ] Returns `413 Payload Too Large`
-- [ ] `CatchPanicLayer::new()` — catch handler panics, return 500
-- [ ] `CatchPanicLayer::custom(fn)` — custom panic response
-- [ ] Panic info available in custom handler
+- [x] `RequestBodyLimitLayer::new(bytes)` — limit request body size
+- [x] Returns `413 Payload Too Large`
+- [x] `CatchPanicLayer::new()` — catch handler panics, return 500
+- [x] `CatchPanicLayer::custom(fn)` — custom panic response
+- [x] Panic info available in custom handler
 
 **Deliverable:** Server never crashes from a panicking handler or oversized upload.
 
@@ -480,11 +480,11 @@
 ### `0.4.10` — Map Middleware
 **Goal:** Lightweight request/response transformation.
 
-- [ ] `MapRequestLayer::new(fn)` — transform request before handler
-- [ ] `MapResponseLayer::new(fn)` — transform response after handler
-- [ ] `MapRequestBodyLayer::new(fn)` — transform request body
-- [ ] `MapResponseBodyLayer::new(fn)` — transform response body
-- [ ] All async-capable
+- [x] `MapRequestLayer::new(fn)` — transform request before handler
+- [x] `MapResponseLayer::new(fn)` — transform response after handler
+- [x] `MapRequestBodyLayer::new(fn)` — transform request body
+- [x] `MapResponseBodyLayer::new(fn)` — transform response body
+- [x] All async-capable
 
 **Deliverable:** Add/remove headers, rewrite paths, modify bodies without a full service.
 
@@ -493,11 +493,11 @@
 ### `0.4.11` — CSRF Middleware
 **Goal:** Protect state-changing routes from CSRF attacks.
 
-- [ ] `CsrfLayer::new(secret)` — generates + validates CSRF tokens
-- [ ] Double-submit cookie pattern
-- [ ] Skip safe methods (GET, HEAD, OPTIONS)
-- [ ] Token available as `Extension<CsrfToken>` in handlers
-- [ ] Customizable token header name
+- [x] `CsrfLayer::new(secret)` — generates + validates CSRF tokens
+- [x] Double-submit cookie pattern
+- [x] Skip safe methods (GET, HEAD, OPTIONS)
+- [x] Token available as `Extension<CsrfToken>` in handlers
+- [x] Customizable token header name
 
 **Deliverable:** POST/PUT/DELETE routes require valid CSRF token.
 

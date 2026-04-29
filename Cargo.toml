@@ -62,7 +62,7 @@ rustls-pemfile = "2"
 multer         = "3"
 
 # Compression
-async-compression = { version = "0.4", features = ["gzip", "br", "zstd", "deflate"] }
+async-compression = { version = "0.4", features = ["gzip", "brotli", "zstd", "deflate", "tokio"] }
 
 # Routing
 matchit        = "0.8"
@@ -89,6 +89,12 @@ proc-macro2    = "1"
 
 # Cookies (0.3.3)
 cookie = { version = "0.18", features = ["percent-encode", "signed", "private"] }
+
+# tokio-util needed for io bridges (ReaderStream, StreamReader)
+tokio-util = { version = "0.7", features = ["io"] }
+
+# base64 for Basic auth encoding/decoding
+base64 = "0.22"
 
 # Internal crates
 ajaya-core       = { path = "ajaya-core", version = "0.4.1" }

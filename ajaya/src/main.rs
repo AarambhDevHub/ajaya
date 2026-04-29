@@ -5,8 +5,10 @@
 //! function-based middleware API.
 
 use ajaya::{
-    AppendHeaders, Cookie, CookieJar, CookieKey, Error, ErrorResponse, FromRef, IntoResponse, Json,
-    Multipart, Path, Query, Request, Response, Router, SignedCookieJar, State, StreamBody, get,
+    AppendHeaders, CatchPanicLayer, CompressionLayer, Cookie, CookieJar, CookieKey, CsrfLayer,
+    CsrfToken, Error, ErrorResponse, Extension, FromRef, Html, IntoResponse, Json, Multipart, Path,
+    Query, Request, RequestBodyLimitLayer, RequestIdLayer, Response, Router, SecurityHeadersLayer,
+    SignedCookieJar, State, StreamBody, TimeoutLayer, TraceLayer, get,
     middleware::{Next, from_fn, from_fn_with_state, map_response},
     post, serve_app,
 };
@@ -14,6 +16,7 @@ use bytes::Bytes;
 use futures_util::stream;
 use http::{StatusCode, header::CACHE_CONTROL};
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use std::{io, sync::Arc};
 use tracing_subscriber::EnvFilter;
 
@@ -206,6 +209,31 @@ async fn not_found() -> (StatusCode, &'static str) {
     (StatusCode::NOT_FOUND, "🔱 Ajaya: Page not found")
 }
 
+/// GET /panic — demonstrates CatchPanicLayer
+async fn deliberate_panic() -> &'static str {
+    panic!("This panic is intentional for demo purposes");
+}
+
+/// GET /csrf-form — demonstrates CSRF token injection
+async fn csrf_form(Extension(token): Extension<CsrfToken>) -> Html<String> {
+    Html(format!(
+        r#"<html><body>
+           <h1>CSRF Demo</h1>
+           <form method="POST" action="/csrf-submit">
+             <input type="hidden" name="csrf_token" value="{token}">
+             <button type="submit">Submit (CSRF protected)</button>
+           </form>
+           <p>x-csrf-token: {token}</p>
+         </body></html>"#,
+        token = token.as_str()
+    ))
+}
+
+/// POST /csrf-submit — protected by CSRF
+async fn csrf_submit() -> &'static str {
+    "CSRF check passed!"
+}
+
 // ── Custom AppError (demonstrating structured errors) ─────────────────────────
 
 #[derive(Debug)]
@@ -301,19 +329,32 @@ async fn main() {
         .route("/set_user", post(set_user))
         .route("/get_user", get(get_user_cookie))
         .route("/files/{*path}", get(serve_file))
+        .route("/panic", get(deliberate_panic))
+        .route("/csrf-form", get(csrf_form))
+        .route("/csrf-submit", post(csrf_submit))
         .fallback(not_found)
         .with_state(state.clone())
-        // ── Middleware stack (last .layer() = outermost = first to run) ─────
-        //
-        //   v0.4.2 style: plain async functions, zero boilerplate.
-        //
-        // Innermost — runs last on request, first on response:
+        // ── New middleware layers (innermost → outermost) ─────────────────────
+        // Body safety (innermost)
+        .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // 10MB
+        // Panic safety
+        .layer(CatchPanicLayer::new())
+        // CSRF protection for state-changing routes
+        .layer(CsrfLayer::new())
+        // Timeout
+        .layer(TimeoutLayer::new(Duration::from_secs(30)))
+        // Request ID (before tracing so spans get the ID)
+        .layer(RequestIdLayer::new())
+        // Structured tracing
+        .layer(TraceLayer::new_for_http())
+        // Security headers
+        .layer(SecurityHeadersLayer::new())
+        // Compression (outermost — compresses all responses)
+        .layer(CompressionLayer::new().min_size(0))
+        // ── 0.4.1 middleware (keep existing) ─────────────────────────────────
         .layer(from_fn(attach_request_id))
-        // Runs after request_id is attached:
         .layer(from_fn_with_state(state, count_requests))
-        // Runs next — logs method, path, status:
         .layer(from_fn(log_requests))
-        // Outermost — appends x-powered-by to every response:
         .layer(map_response(add_powered_by_header));
 
     if let Err(e) = serve_app("0.0.0.0:8080", app).await {

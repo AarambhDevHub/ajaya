@@ -47,7 +47,7 @@ curl http://localhost:8080/not-a-route
 
 ---
 
-## Features (v0.2.6)
+## Features (v0.4.11)
 
 ### ✅ Type-Safe Extractors
 
@@ -145,6 +145,32 @@ let app = Router::new()
 
 Handlers can return `Result<T, Error>` and use `?` for error propagation. Errors produce secure JSON responses — internal details are never leaked.
 
+### Complete Middleware System
+
+| Layer | Description |
+|---|---|
+| `CorsLayer` | Full CORS spec, `permissive()` and `very_permissive()` presets |
+| `CompressionLayer` | gzip, brotli, zstd, deflate response compression |
+| `DecompressionLayer` | Request body decompression |
+| `TimeoutLayer` | 408 on slow handlers |
+| `RequestIdLayer` | UUID v4 per request in `x-request-id` header |
+| `TraceLayer` | Structured tracing spans (method, path, status, latency) |
+| `SecurityHeadersLayer` | Full OWASP header suite (X-Frame-Options, HSTS, CSP...) |
+| `SetResponseHeaderLayer` | Set/override/append response headers |
+| `SensitiveHeadersLayer` | Redact sensitive headers in logs |
+| `RateLimitLayer` | Token bucket per IP / header / global |
+| `RequireAuthorizationLayer` | Bearer, Basic, or custom auth |
+| `RequestBodyLimitLayer` | 413 on oversized request bodies |
+| `CatchPanicLayer` | 500 on handler panics, no server crash |
+| `MapRequestBodyLayer` | Transform request body bytes |
+| `MapResponseBodyLayer` | Transform response body bytes |
+| `CsrfLayer` | Double-submit cookie CSRF protection |
+| `from_fn` | Middleware from a plain async function |
+| `from_fn_with_state` | Same, with access to router state |
+| `map_request` | Transform request only (no response) |
+| `map_response` | Transform response only (no request) |
+
+
 ---
 
 ## Workspace Structure
@@ -177,14 +203,13 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | **0.1.x** | Routing System | ✅ Complete |
 | **0.2.x** | Extractors | ✅ Complete |
 | **0.3.x** | Responses & Error Handling | ✅ Complete |
-| **0.4.x** | Middleware | 🚧 In Progress |
-| 0.5.x | WebSocket, SSE | ⏳ Planned |
+| **0.4.x** | Middleware | ✅ Complete |
+| 0.5.x | WebSocket, SSE | ⏳ Next |
 | 0.6.x | TLS, HTTP/2, Static Files | ⏳ Planned |
 | 0.7.x | Macros, Testing, Config | ⏳ Planned |
 | 0.8.x | Observability & Security | ⏳ Planned |
 | 0.9.x | Performance Sprint | ⏳ Planned |
 | 0.10.x | Stabilization & Docs | ⏳ Planned |
-
 ---
 
 ## Architecture
