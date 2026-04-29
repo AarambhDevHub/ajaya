@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya"
-version = "0.4.1"
+version = "0.4.11"
 dependencies = [
  "ajaya-core",
  "ajaya-extract",
@@ -77,7 +77,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya-core"
-version = "0.4.1"
+version = "0.4.11"
 dependencies = [
  "bytes",
  "futures-util",
@@ -96,7 +96,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya-extract"
-version = "0.4.1"
+version = "0.4.11"
 dependencies = [
  "ajaya-core",
  "ajaya-router",
@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya-hyper"
-version = "0.4.1"
+version = "0.4.11"
 dependencies = [
  "ajaya-core",
  "ajaya-router",
@@ -135,11 +135,11 @@ dependencies = [
 
 [[package]]
 name = "ajaya-macros"
-version = "0.4.1"
+version = "0.4.11"
 
 [[package]]
 name = "ajaya-middleware"
-version = "0.4.1"
+version = "0.4.11"
 dependencies = [
  "ajaya-core",
  "ajaya-router",
@@ -160,7 +160,7 @@ dependencies = [
 
 [[package]]
 name = "ajaya-router"
-version = "0.4.1"
+version = "0.4.11"
 dependencies = [
  "ajaya-core",
  "bytes",
@@ -176,23 +176,23 @@ dependencies = [
 
 [[package]]
 name = "ajaya-sse"
-version = "0.4.1"
+version = "0.4.11"
 
 [[package]]
 name = "ajaya-static"
-version = "0.4.1"
+version = "0.4.11"
 
 [[package]]
 name = "ajaya-test"
-version = "0.4.1"
+version = "0.4.11"
 
 [[package]]
 name = "ajaya-tls"
-version = "0.4.1"
+version = "0.4.11"
 
 [[package]]
 name = "ajaya-ws"
-version = "0.4.1"
+version = "0.4.11"
 
 [[package]]
 name = "alloc-no-stdlib"

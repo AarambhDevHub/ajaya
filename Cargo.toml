@@ -16,7 +16,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.4.1"
+version = "0.4.11"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/AarambhDevHub/ajaya"
@@ -97,14 +97,14 @@ tokio-util = { version = "0.7", features = ["io"] }
 base64 = "0.22"
 
 # Internal crates
-ajaya-core       = { path = "ajaya-core", version = "0.4.1" }
-ajaya-router     = { path = "ajaya-router", version = "0.4.1" }
-ajaya-hyper      = { path = "ajaya-hyper", version = "0.4.1" }
-ajaya-extract    = { path = "ajaya-extract", version = "0.4.1" }
-ajaya-middleware = { path = "ajaya-middleware", version = "0.4.1" }
-ajaya-ws         = { path = "ajaya-ws", version = "0.4.1" }
-ajaya-sse        = { path = "ajaya-sse", version = "0.4.1" }
-ajaya-static     = { path = "ajaya-static", version = "0.4.1" }
-ajaya-tls        = { path = "ajaya-tls", version = "0.4.1" }
-ajaya-macros     = { path = "ajaya-macros", version = "0.4.1" }
-ajaya-test       = { path = "ajaya-test", version = "0.4.1" }
+ajaya-core       = { path = "ajaya-core", version = "0.4.11" }
+ajaya-router     = { path = "ajaya-router", version = "0.4.11" }
+ajaya-hyper      = { path = "ajaya-hyper", version = "0.4.11" }
+ajaya-extract    = { path = "ajaya-extract", version = "0.4.11" }
+ajaya-middleware = { path = "ajaya-middleware", version = "0.4.11" }
+ajaya-ws         = { path = "ajaya-ws", version = "0.4.11" }
+ajaya-sse        = { path = "ajaya-sse", version = "0.4.11" }
+ajaya-static     = { path = "ajaya-static", version = "0.4.11" }
+ajaya-tls        = { path = "ajaya-tls", version = "0.4.11" }
+ajaya-macros     = { path = "ajaya-macros", version = "0.4.11" }
+ajaya-test       = { path = "ajaya-test", version = "0.4.11" }
