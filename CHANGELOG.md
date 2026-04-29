@@ -9,6 +9,135 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.11] — 2026-MM-DD — CSRF Protection
+
+### Added
+- `ajaya_middleware::csrf::CsrfLayer` — double-submit cookie CSRF protection
+- `CsrfToken` type — generated/verified per request, available as `Extension<CsrfToken>`
+- Automatic CSRF cookie generation (`csrf_token` cookie)  
+- State-changing method enforcement (POST, PUT, PATCH, DELETE require matching `x-csrf-token` header)
+- Safe method passthrough (GET, HEAD, OPTIONS, TRACE are never checked)
+- `.secure(bool)` and `.same_site(SameSite)` builder options
+
+---
+
+## [0.4.10] — 2026-MM-DD — Map Body Middleware
+
+### Added
+- `MapRequestBodyLayer` — transform request body bytes before the handler
+- `MapResponseBodyLayer` — transform response body bytes after the handler
+- Both support async closures: `|bytes: Bytes| async move { transform(bytes) }`
+
+---
+
+## [0.4.9] — 2026-MM-DD — Body Limit & Panic Recovery
+
+### Added
+- `RequestBodyLimitLayer::new(bytes)` — enforces max request body size
+  - Checks `Content-Length` header immediately for early rejection
+  - Enforces streaming limit during body collection
+  - Returns `413 Payload Too Large` with JSON error body
+- `CatchPanicLayer::new()` — catches handler panics via `tokio::task::spawn`
+  - Returns `500 Internal Server Error` instead of crashing the task
+  - `CatchPanicLayer::custom(fn)` — custom panic response closure
+  - Logs panic message at `ERROR` level via tracing
+
+---
+
+## [0.4.8] — 2026-MM-DD — Auth Middleware
+
+### Added
+- `RequireAuthorizationLayer::bearer(token)` — validates static Bearer token
+- `RequireAuthorizationLayer::basic(username, password)` — HTTP Basic auth
+- `RequireAuthorizationLayer::custom(fn)` — synchronous custom validator
+- Returns `401 Unauthorized` with proper `WWW-Authenticate` header
+- JSON error response body for API compatibility
+
+---
+
+## [0.4.7] — 2026-MM-DD — Rate Limiting
+
+### Added
+- `RateLimitLayer::new(capacity, window)` — token bucket per key
+- Key extraction strategies: `IpAddress` (default), `Header(name)`, `Global`
+- `.by_header(name)` — rate limit by a request header value
+- `.global()` — shared bucket for all requests
+- Returns `429 Too Many Requests` with `Retry-After` and `X-RateLimit-*` headers
+- Reads `X-Forwarded-For` / `X-Real-IP` headers for IP detection behind proxies
+- Thread-safe via `parking_lot::Mutex`
+
+---
+
+## [0.4.6] — 2026-MM-DD — Security Headers
+
+### Added
+- `SecurityHeadersLayer` — injects the full OWASP recommended header suite:
+  - `X-Frame-Options: DENY`
+  - `X-Content-Type-Options: nosniff`
+  - `X-XSS-Protection: 1; mode=block`
+  - `Strict-Transport-Security: max-age=31536000; includeSubDomains`
+  - `Referrer-Policy: strict-origin-when-cross-origin`
+  - `Permissions-Policy: geolocation=(), microphone=(), camera=()`
+  - `Content-Security-Policy` (configurable)
+- `SetResponseHeaderLayer::if_not_present(name, value)` — conservative header setting
+- `SetResponseHeaderLayer::overriding(name, value)` — always overwrite
+- `SetResponseHeaderLayer::appending(name, value)` — append without removing existing
+- `SetRequestHeaderLayer` — same modes, applied to requests
+- `SensitiveHeadersLayer` — marks headers for log redaction via extensions
+- All builder methods: `.content_security_policy()`, `.hsts_max_age()`, `.frame_options()`
+
+---
+
+## [0.4.5] — 2026-MM-DD — Tracing Middleware
+
+### Added
+- `TraceLayer::new_for_http()` — creates a tracing span per request
+- Span fields: `http.method`, `http.path`, `http.version`, `http.status_code`, `latency`
+- `DefaultMakeSpan` with configurable log level and header inclusion
+- `LatencyUnit` enum: `Millis` (default), `Micros`, `Seconds`
+- Automatic log levels: INFO (2xx), WARN (4xx), ERROR (5xx)
+- `.make_span_with()`, `.latency_unit()`, `.log_failures()` builder methods
+
+---
+
+## [0.4.4] — 2026-MM-DD — Request ID Middleware
+
+### Added
+- `RequestIdLayer` — generates UUID v4 per request
+  - Inserts `x-request-id` request and response header
+  - Inserts `Extension<RequestId>` for handler access
+  - Reuses incoming `x-request-id` if present (passthrough)
+- `PropagateRequestIdLayer` — copies incoming `x-request-id` to response
+- `RequestId` newtype wrapping `String`
+
+---
+
+## [0.4.3] — 2026-MM-DD — Timeout Middleware
+
+### Added
+- `TimeoutLayer::new(Duration)` — enforces request completion deadline
+- Returns `408 Request Timeout` with JSON body on timeout
+- Includes timeout duration in error message (`{N}ms time limit`)
+- Per-route via `MethodRouter::layer(TimeoutLayer::new(...))`
+
+---
+
+## [0.4.2] — 2026-MM-DD — Compression & Decompression
+
+### Added
+- `CompressionLayer` — transparent response compression
+  - Supported encodings: gzip, brotli, zstd, deflate
+  - Reads `Accept-Encoding`, sets `Content-Encoding` and `Vary: Accept-Encoding`
+  - Preference order: zstd > br > gzip > deflate
+  - Skips already-encoded responses and non-compressible content types
+  - Configurable minimum size (`min_size`, default 1024 bytes)
+- `DecompressionLayer` — decompresses request bodies
+  - Reads `Content-Encoding`, removes header after decompression
+- `CompressionLevel` enum: `Default`, `Fastest`, `Best`
+- Builder API: `.gzip()`, `.br()`, `.zstd()`, `.deflate()`, `.quality()`, `.min_size()`
+
+---
+
 ## [0.4.1] — 2026-04-20 — CORS Middleware
 
 ### Added
