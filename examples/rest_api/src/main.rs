@@ -92,7 +92,7 @@ async fn health() -> Result<Json<serde_json::Value>, Error> {
     Ok(Json(serde_json::json!({
         "status": "healthy",
         "framework": "Arvik",
-        "version": "0.5.0"
+        "version": "0.6.3"
     })))
 }
 
@@ -227,7 +227,7 @@ async fn main() {
         r#"
     ╔═══════════════════════════════════════════════╗
     ║                                               ║
-    ║     ⚡  Arvik v0.5.0                           ║
+    ║     ⚡  Arvik v0.6.3                           ║
     ║     Fast, Typed, and Fearless Web Framework for Rust       ║
     ║                                               ║
     ║     → http://localhost:8080                    ║
@@ -255,7 +255,7 @@ async fn main() {
     );
 
     let state = AppState {
-        app_name: "Arvik Framework (v0.5.0)".to_string(),
+        app_name: "Arvik Framework (v0.6.3)".to_string(),
         cookie_key: CookieKey::generate(),
         request_count: Arc::new(std::sync::atomic::AtomicU64::new(0)),
     };

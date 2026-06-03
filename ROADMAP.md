@@ -557,11 +557,11 @@
 ### `0.6.0` — rustls TLS
 **Goal:** HTTPS with rustls (no OpenSSL dependency).
 
-- [ ] `arvik-tls`: `RustlsConfig` from PEM files
-- [ ] `RustlsConfig::from_pem()` — in-memory PEM
-- [ ] `RustlsConfig::self_signed()` — dev mode self-signed cert
-- [ ] `arvik::serve_tls(app, addr, config)` entry point
-- [ ] ALPN negotiation: prefer HTTP/2, fall back to HTTP/1.1
+- [x] `arvik-tls`: `RustlsConfig` from PEM files
+- [x] `RustlsConfig::from_pem()` — in-memory PEM
+- [x] `RustlsConfig::self_signed()` — dev mode self-signed cert
+- [x] `arvik::serve_tls(app, addr, config)` entry point
+- [x] ALPN negotiation: prefer HTTP/2, fall back to HTTP/1.1
 
 **Deliverable:** `cargo run` → HTTPS server on port 443.
 
@@ -570,10 +570,10 @@
 ### `0.6.1` — TLS Hot Reload
 **Goal:** Rotate TLS certs without downtime.
 
-- [ ] `RustlsConfig::reload_from_pem_file()` — swap cert/key at runtime
-- [ ] Watch file changes (via `notify` crate, feature flag)
-- [ ] Existing connections unaffected; new connections use new cert
-- [ ] Log cert expiry warnings
+- [x] `RustlsConfig::reload_from_pem_file()` — swap cert/key at runtime
+- [x] Watch file changes (via `notify` crate, feature flag)
+- [x] Existing connections unaffected; new connections use new cert
+- [x] Log cert expiry warnings
 
 **Deliverable:** Let's Encrypt cert renewal works without server restart.
 
@@ -582,10 +582,10 @@
 ### `0.6.2` — native-tls Backend
 **Goal:** OpenSSL / SChannel / Secure Transport support.
 
-- [ ] `arvik-tls`: `NativeTlsConfig` from PKCS12
-- [ ] `NativeTlsConfig::from_pkcs12(data, password)`
-- [ ] `arvik::serve_native_tls(app, addr, config)` entry point
-- [ ] Feature flag: `native-tls` (disabled by default)
+- [x] `arvik-tls`: `NativeTlsConfig` from PKCS12
+- [x] `NativeTlsConfig::from_pkcs12(data, password)`
+- [x] `arvik::serve_native_tls(app, addr, config)` entry point
+- [x] Feature flag: `native-tls` (disabled by default)
 
 **Deliverable:** TLS on Windows/macOS without bundling rustls.
 
@@ -594,10 +594,10 @@
 ### `0.6.3` — HTTP/2 Tuning
 **Goal:** Optimal HTTP/2 performance settings.
 
-- [ ] `ServerConfig` HTTP/2 options: window sizes, concurrent streams, keep-alive
-- [ ] `arvik::serve_h2c(app, addr)` — HTTP/2 over cleartext
-- [ ] Push promises (server push) API
-- [ ] HTTP/2 trailers support
+- [x] `ServerConfig` HTTP/2 options: window sizes, concurrent streams, keep-alive
+- [x] `arvik::serve_h2c(app, addr)` — HTTP/2 over cleartext
+- [x] `Preload` / `PreloadLink` replacement for deprecated HTTP/2 push promises
+- [x] HTTP/2 trailers support
 
 **Deliverable:** h2c internal service-to-service communication works.
 
@@ -688,9 +688,9 @@
 ---
 
 ### `0.7.4` — Configuration System
-**Goal:** Centralized server configuration.
+**Goal:** Centralized file/env application configuration.
 
-- [ ] `ServerConfig` struct with all tuning options
+- [ ] Map file/env settings onto the existing low-level `ServerConfig`
 - [ ] `AjayaConfig::builder()` with `.file()`, `.env_prefix()`, `.defaults()`, `.build()`
 - [ ] Support: TOML, JSON, env vars
 - [ ] Hot-reload config (debounced file watcher)

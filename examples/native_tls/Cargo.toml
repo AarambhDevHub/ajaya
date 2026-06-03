@@ -1,0 +1,15 @@
+[package]
+name = "native-tls-demo"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "native-tls example for Arvik"
+
+[[bin]]
+name = "native_tls"
+path = "src/main.rs"
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["native-tls"] }
+tokio = { workspace = true }
+tracing-subscriber = { workspace = true }

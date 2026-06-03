@@ -34,8 +34,10 @@ pub use body::Body;
 pub use error::{Error, ErrorResponse};
 pub use extract::{FromRequest, FromRequestParts};
 pub use handler::Handler;
-pub use into_response::{Html, IntoResponse, Json};
-pub use into_response_parts::{AppendHeaders, IntoResponseParts, ResponseParts};
+pub use into_response::{Html, IntoResponse, Json, Trailers};
+pub use into_response_parts::{
+    AppendHeaders, IntoResponseParts, Preload, PreloadLink, ResponseParts,
+};
 pub use method_filter::MethodFilter;
 pub use request::Request;
 pub use request_parts::RequestParts;
