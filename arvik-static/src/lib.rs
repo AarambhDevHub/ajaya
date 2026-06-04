@@ -6,7 +6,6 @@
 //! behavior.
 
 use std::convert::Infallible;
-use std::ffi::OsString;
 use std::future::Future;
 #[cfg(feature = "embed")]
 use std::marker::PhantomData;
@@ -1041,7 +1040,7 @@ fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
     let mut file_name = path
         .file_name()
         .map(|name| name.to_os_string())
-        .unwrap_or_else(OsString::new);
+        .unwrap_or_default();
     file_name.push(suffix);
 
     let mut path = path.to_path_buf();
