@@ -1,6 +1,6 @@
 //! WebSocket multi-room chat server example.
 //!
-//! Run: cargo run -p arvik --example websocket_chat --features ws
+//! Run: cargo run --manifest-path examples/websocket_chat/Cargo.toml
 //!
 //! Connect via browser: http://localhost:8080
 //! Connect via wscat:   wscat -c ws://localhost:8080/ws

@@ -49,6 +49,38 @@ curl http://localhost:8080/not-a-route
 # => 404 Not Found
 ```
 
+## Running Examples
+
+The examples are kept outside the main workspace checks, so run them with their
+own manifests:
+
+```bash
+# Full REST API demo
+cargo run --manifest-path examples/rest_api/Cargo.toml
+
+# WebSocket chat demo
+cargo run --manifest-path examples/websocket_chat/Cargo.toml
+
+# Server-Sent Events demo
+cargo run --manifest-path examples/sse_demo/Cargo.toml
+
+# HTTP/2 cleartext, requires the example's http2 feature dependency
+cargo run --manifest-path examples/h2c/Cargo.toml
+
+# rustls HTTPS, uses a generated self-signed development certificate
+cargo run --manifest-path examples/tls_rustls/Cargo.toml
+
+# rustls HTTPS with hot reload, requires PEM certificate and key paths
+cargo run --manifest-path examples/tls_hot_reload/Cargo.toml -- cert.pem key.pem
+
+# native-tls HTTPS, requires a PKCS#12 identity and optional password
+cargo run --manifest-path examples/native_tls/Cargo.toml -- identity.p12 password
+```
+
+The TLS examples listen on `0.0.0.0:8443`; the plain HTTP examples listen on
+their own configured ports. Native TLS ALPN support depends on the platform TLS
+stack, while rustls is the guaranteed HTTP/2 ALPN backend.
+
 ---
 
 ## Features (v0.6.3)

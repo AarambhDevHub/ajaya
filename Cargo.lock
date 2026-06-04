@@ -827,15 +827,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "h2c-demo"
-version = "0.6.3"
-dependencies = [
- "arvik",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "hashbrown"
 version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1192,15 +1183,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "native-tls-demo"
-version = "0.6.3"
-dependencies = [
- "arvik",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1543,23 +1525,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
-name = "rest-api"
-version = "0.6.3"
-dependencies = [
- "arvik",
- "bytes",
- "cookie",
- "futures-util",
- "http",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1842,19 +1807,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
 
 [[package]]
-name = "sse-demo"
-version = "0.6.3"
-dependencies = [
- "arvik",
- "futures-util",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1976,24 +1928,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tls-hot-reload"
-version = "0.6.3"
-dependencies = [
- "arvik",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "tls-rustls"
-version = "0.6.3"
-dependencies = [
- "arvik",
- "tokio",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "tokio"
 version = "1.51.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2039,18 +1973,6 @@ checksum = "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61"
 dependencies = [
  "rustls",
  "tokio",
-]
-
-[[package]]
-name = "tokio-stream"
-version = "0.1.18"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32da49809aab5c3bc678af03902d4ccddea2a87d028d86392a4b1560c6906c70"
-dependencies = [
- "futures-core",
- "pin-project-lite",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -2377,17 +2299,6 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
  "semver",
-]
-
-[[package]]
-name = "websocket-chat"
-version = "0.6.3"
-dependencies = [
- "arvik",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

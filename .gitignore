@@ -1,5 +1,7 @@
 # Rust build artifacts
 /target/
+/examples/*/target/
+/examples/*/Cargo.lock
 **/*.rs.bk
 
 # Cargo lock (keep for binary crates, ignore for libraries)

@@ -1,4 +1,14 @@
 [workspace]
+resolver = "2"
+exclude = [
+    "examples/websocket_chat",
+    "examples/rest_api",
+    "examples/sse_demo",
+    "examples/tls_rustls",
+    "examples/tls_hot_reload",
+    "examples/native_tls",
+    "examples/h2c",
+]
 members = [
     "arvik",
     "arvik-core",
@@ -12,16 +22,7 @@ members = [
     "arvik-tls",
     "arvik-macros",
     "arvik-test",
-    # Examples
-    "examples/websocket_chat",
-    "examples/rest_api",
-    "examples/sse_demo",
-    "examples/tls_rustls",
-    "examples/tls_hot_reload",
-    "examples/native_tls",
-    "examples/h2c",
 ]
-resolver = "2"
 
 [workspace.package]
 version = "0.6.3"

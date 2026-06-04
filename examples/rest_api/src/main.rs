@@ -3,7 +3,7 @@
 //! REST API demo showcasing routing, extractors, middleware, cookies,
 //! streaming, CSRF protection, and panic recovery.
 //!
-//! Run: cargo run -p rest-api
+//! Run: cargo run --manifest-path examples/rest_api/Cargo.toml
 //! Test: curl http://localhost:8080/
 
 use arvik::{

@@ -45,6 +45,7 @@ pub type Result<T> = std::result::Result<T, TlsError>;
 pub mod rustls {
     use std::path::Path;
     use std::sync::Arc;
+    #[cfg(feature = "tls-hot-reload")]
     use std::time::Duration;
 
     use ::rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};

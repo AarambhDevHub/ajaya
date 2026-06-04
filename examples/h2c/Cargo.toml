@@ -1,8 +1,8 @@
 [package]
 name = "h2c-demo"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
+version = "0.6.3"
+edition = "2024"
+license = "MIT OR Apache-2.0"
 description = "HTTP/2 cleartext example for Arvik"
 
 [[bin]]
@@ -11,5 +11,5 @@ path = "src/main.rs"
 
 [dependencies]
 arvik = { path = "../../arvik", features = ["http2"] }
-tokio = { workspace = true }
-tracing-subscriber = { workspace = true }
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3"

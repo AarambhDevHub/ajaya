@@ -12,7 +12,7 @@
 //!
 //! Run with:
 //! ```text
-//! cargo run -p sse-demo
+//! cargo run --manifest-path examples/sse_demo/Cargo.toml
 //! ```
 //! Then open http://127.0.0.1:3000 in your browser.
 
