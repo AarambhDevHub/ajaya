@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.6.3-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.5-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -21,7 +21,7 @@
 
 It is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**, designed to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> ⚡ **v0.6.3 — TLS and HTTP/2** Arvik now ships rustls HTTPS, TLS hot reload, native-tls support, h2c, HTTP/2 tuning, preload links, and trailer support. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> ⚡ **v0.6.5 — Static Assets** Arvik now ships rustls HTTPS, TLS hot reload, native-tls support, h2c, HTTP/2 tuning, filesystem static files, and embedded static assets. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -40,7 +40,7 @@ Then in another terminal:
 
 ```bash
 curl http://localhost:8080/
-# => {"status":"healthy","framework":"Arvik","version":"0.6.3"}
+# => {"status":"healthy","framework":"Arvik","version":"0.6.5"}
 
 curl http://localhost:8080/users/42
 # => {"id":"42","name":"User from path param"}
@@ -75,6 +75,12 @@ cargo run --manifest-path examples/tls_hot_reload/Cargo.toml -- cert.pem key.pem
 
 # native-tls HTTPS, requires a PKCS#12 identity and optional password
 cargo run --manifest-path examples/native_tls/Cargo.toml -- identity.p12 password
+
+# Filesystem static files, requires static-files
+cargo run --manifest-path examples/static_files/Cargo.toml
+
+# Embedded static files, requires embedded-static
+cargo run --manifest-path examples/embedded_static/Cargo.toml
 ```
 
 The TLS examples listen on `0.0.0.0:8443`; the plain HTTP examples listen on
@@ -83,7 +89,7 @@ stack, while rustls is the guaranteed HTTP/2 ALPN backend.
 
 ---
 
-## Features (v0.6.3)
+## Features (v0.6.5)
 
 ### ✅ Type-Safe Extractors
 
@@ -412,6 +418,58 @@ serve_h2c_with_config(app, "0.0.0.0:8080", config).await?;
 
 HTTP/2 server push promises are not implemented in Arvik Hyper mode because the browser feature is deprecated and Hyper does not expose a stable push API. Use `Preload` / `PreloadLink` to emit `Link: rel=preload` headers instead.
 
+### ✅ Static Assets
+
+Filesystem static serving is opt-in with `static-files`.
+
+```toml
+arvik = { version = "0.6", features = ["static-files"] }
+```
+
+```rust
+use arvik::{Router, ServeDir, ServeFile};
+use std::path::PathBuf;
+
+let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+let favicon = assets.join("favicon.ico");
+
+let app = Router::new()
+    .route_service("/favicon.ico", ServeFile::new(favicon))
+    .nest_service(
+        "/static",
+        ServeDir::new(assets)
+            .precompressed_gzip()
+            .precompressed_br()
+            .directory_listing(true)
+            .cache_control("public, max-age=60"),
+    );
+```
+
+Embedded static assets use `embedded-static` and `rust-embed`.
+
+```toml
+arvik = { version = "0.6", features = ["embedded-static"] }
+```
+
+```rust
+use arvik::{Embed, EmbeddedFileService, Router};
+
+#[derive(Embed)]
+#[folder = "assets"]
+#[crate_path = "arvik"]
+struct Assets;
+
+let app = Router::new().nest_service(
+    "/assets",
+    EmbeddedFileService::<Assets>::new()
+        .precompressed_gzip()
+        .precompressed_br()
+        .cache_control("public, max-age=31536000, immutable"),
+);
+```
+
+Static responses include MIME detection, `Last-Modified`, `ETag`, conditional `304`, single byte ranges, optional directory listings, and best-match `.br` / `.gz` precompressed variants.
+
 ---
 
 ## Workspace Structure
@@ -426,7 +484,7 @@ arvik/
 ├── arvik-middleware/   # CORS, compression, timeout, auth, rate limits
 ├── arvik-ws/           # WebSocket support (v0.5.0 ✅)
 ├── arvik-sse/          # Server-Sent Events (v0.5.1 ✅)
-├── arvik-static/       # Static file serving (coming in v0.6.4)
+├── arvik-static/       # Static file serving + embedded assets (v0.6.x ✅)
 ├── arvik-tls/          # TLS via rustls + native-tls (v0.6.x ✅)
 ├── arvik-macros/       # Proc macros: #[handler], #[route] (coming in v0.7.x)
 └── arvik-test/         # Testing utilities (coming in v0.7.x)
@@ -452,7 +510,8 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | **0.6.1** | TLS Hot Reload | ✅ Complete |
 | **0.6.2** | native-tls Backend | ✅ Complete |
 | **0.6.3** | HTTP/2 Tuning | ✅ Complete |
-| 0.6.4+ | Static Files | ⏳ Planned |
+| **0.6.4** | Static File Serving | ✅ Complete |
+| **0.6.5** | Embedded Static Files | ✅ Complete |
 | 0.7.x | Macros, Testing, Config | ⏳ Planned |
 | 0.8.x | Observability & Security | ⏳ Planned |
 | 0.9.x | Performance Sprint | ⏳ Planned |

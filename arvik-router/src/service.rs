@@ -9,8 +9,10 @@ use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 
+use arvik_core::OriginalUri;
 use arvik_core::request::Request;
 use arvik_core::response::Response;
+use http::Uri;
 use tower_service::Service;
 
 /// Wraps a Tower [`Service`] to implement Arvik's [`Handler`] trait.
@@ -54,4 +56,86 @@ where
             }
         })
     }
+}
+
+/// Service wrapper used by `Router::nest_service`.
+///
+/// It preserves the original URI in request extensions, then strips the mount
+/// prefix from the URI seen by the nested service.
+pub struct StripPrefixService<T> {
+    prefix: String,
+    service: T,
+}
+
+impl<T: Clone> Clone for StripPrefixService<T> {
+    fn clone(&self) -> Self {
+        Self {
+            prefix: self.prefix.clone(),
+            service: self.service.clone(),
+        }
+    }
+}
+
+impl<T> StripPrefixService<T> {
+    /// Create a prefix-stripping service wrapper.
+    pub fn new(prefix: impl Into<String>, service: T) -> Self {
+        Self {
+            prefix: prefix.into(),
+            service,
+        }
+    }
+}
+
+impl<T> Service<Request> for StripPrefixService<T>
+where
+    T: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    T::Future: Send + 'static,
+{
+    type Response = Response;
+    type Error = Infallible;
+    type Future = T::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: Request) -> Self::Future {
+        let original_uri = req.uri().clone();
+        if req.extensions().get::<OriginalUri>().is_none() {
+            req.extensions_mut()
+                .insert(OriginalUri(original_uri.clone()));
+        }
+
+        if let Some(stripped) = strip_uri_prefix(&original_uri, &self.prefix) {
+            *req.uri_mut() = stripped;
+        }
+
+        self.service.call(req)
+    }
+}
+
+fn strip_uri_prefix(uri: &Uri, prefix: &str) -> Option<Uri> {
+    let path = uri.path();
+    let stripped_path = if prefix == "/" {
+        path
+    } else if path == prefix || path == format!("{prefix}/") {
+        "/"
+    } else {
+        path.strip_prefix(prefix)
+            .filter(|rest| rest.starts_with('/'))
+            .unwrap_or(path)
+    };
+
+    let mut path_and_query = stripped_path.to_string();
+    if let Some(query) = uri.query() {
+        path_and_query.push('?');
+        path_and_query.push_str(query);
+    }
+
+    let mut parts = uri.clone().into_parts();
+    parts.path_and_query = Some(path_and_query.parse().ok()?);
+    Uri::from_parts(parts).ok()
 }

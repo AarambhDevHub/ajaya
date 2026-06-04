@@ -16,6 +16,7 @@ arvik-router  = { workspace = true }
 arvik-extract = { workspace = true }
 arvik-middleware = { workspace = true }
 arvik-tls     = { workspace = true, optional = true }
+arvik-static  = { workspace = true, optional = true, default-features = false }
 arvik-ws      = { workspace = true, optional = true }
 arvik-sse        = { workspace = true, optional = true }
 tokio         = { workspace = true }
@@ -39,5 +40,7 @@ tls = ["dep:arvik-tls", "arvik-hyper/tls", "arvik-tls/rustls"]
 tls-hot-reload = ["tls", "arvik-hyper/tls-hot-reload", "arvik-tls/tls-hot-reload"]
 native-tls = ["dep:arvik-tls", "arvik-hyper/native-tls", "arvik-tls/native-tls"]
 native-tls-vendored = ["native-tls", "arvik-hyper/native-tls-vendored", "arvik-tls/native-tls-vendored"]
+static-files = ["dep:arvik-static", "arvik-static/fs"]
+embedded-static = ["static-files", "arvik-static/embed"]
 ws = ["dep:arvik-ws"]
 sse = ["dep:arvik-sse"]

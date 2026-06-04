@@ -39,7 +39,7 @@ pub use into_response_parts::{
     AppendHeaders, IntoResponseParts, Preload, PreloadLink, ResponseParts,
 };
 pub use method_filter::MethodFilter;
-pub use request::Request;
+pub use request::{OriginalUri, Request};
 pub use request_parts::RequestParts;
 pub use response::{Redirect, Response, ResponseBuilder};
 pub use stream_body::StreamBody;

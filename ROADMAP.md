@@ -606,16 +606,16 @@
 ### `0.6.4` — Static File Serving
 **Goal:** Serve files and directories efficiently.
 
-- [ ] `arvik-static`: `ServeDir::new(path)` — serve directory tree
-- [ ] `ServeFile::new(path)` — serve single file
-- [ ] MIME type detection from extension
-- [ ] `Last-Modified` + `ETag` headers
-- [ ] `If-Modified-Since` / `If-None-Match` conditional GET → 304
-- [ ] Range requests (`Range: bytes=0-1023`) → 206 Partial Content
-- [ ] `.not_found_service()` — custom 404 handler
-- [ ] `.precompressed_gzip()` — serve `.gz` pre-compressed file if exists
-- [ ] `.precompressed_br()` — serve `.br` pre-compressed file if exists
-- [ ] Directory listing (opt-in)
+- [x] `arvik-static`: `ServeDir::new(path)` — serve directory tree
+- [x] `ServeFile::new(path)` — serve single file
+- [x] MIME type detection from extension
+- [x] `Last-Modified` + `ETag` headers
+- [x] `If-Modified-Since` / `If-None-Match` conditional GET → 304
+- [x] Range requests (`Range: bytes=0-1023`) → 206 Partial Content
+- [x] `.not_found_service()` — custom 404 handler
+- [x] `.precompressed_gzip()` — serve `.gz` pre-compressed file if exists
+- [x] `.precompressed_br()` — serve `.br` pre-compressed file if exists
+- [x] Directory listing (opt-in)
 
 **Deliverable:** Full static file CDN-like behavior.
 
@@ -624,10 +624,10 @@
 ### `0.6.5` — Embedded Static Files
 **Goal:** Bundle assets into binary at compile time.
 
-- [ ] `rust-embed` integration
-- [ ] `EmbeddedFileService<A: RustEmbed>` — Tower service from embedded assets
-- [ ] Proper Content-Type, ETag (hash of content), cache headers
-- [ ] Works same as `ServeDir` but from binary
+- [x] `rust-embed` integration
+- [x] `EmbeddedFileService<A: RustEmbed>` — Tower service from embedded assets
+- [x] Proper Content-Type, ETag (hash of content), cache headers
+- [x] Works same as `ServeDir` but from binary
 
 **Deliverable:** Single-binary deployment with bundled frontend assets.
 

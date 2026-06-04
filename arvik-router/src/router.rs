@@ -33,7 +33,7 @@ use tower_service::Service;
 use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn, oneshot};
 use crate::method_router::{MethodRouter, StateBound};
 use crate::params::PathParams;
-use crate::service::ServiceHandler;
+use crate::service::{ServiceHandler, StripPrefixService};
 
 /// Extension type inserted by the router to record which route pattern matched.
 ///
@@ -161,9 +161,19 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
             + 'static,
         T::Future: Send + 'static,
     {
-        let prefix = prefix.trim_end_matches('/');
-        let path = format!("{prefix}/*__rest");
-        self.route(&path, crate::any(ServiceHandler::new(service)))
+        let prefix = normalize_service_prefix(prefix);
+        let service = StripPrefixService::new(prefix.clone(), service);
+
+        let mut router = self.route_service(&prefix, service.clone());
+        if prefix != "/" {
+            router = router.route_service(&format!("{prefix}/"), service.clone());
+        }
+        let path = if prefix == "/" {
+            "/{*__rest}".to_string()
+        } else {
+            format!("{prefix}/{{*__rest}}")
+        };
+        router.route(&path, crate::any(ServiceHandler::new(service)))
     }
 
     // ── Layer methods ────────────────────────────────────────────────────────
@@ -428,6 +438,17 @@ fn not_found() -> Response {
         .text("Not Found")
 }
 
+fn normalize_service_prefix(prefix: &str) -> String {
+    let trimmed = prefix.trim_end_matches('/');
+    if trimmed.is_empty() {
+        "/".to_string()
+    } else if trimmed.starts_with('/') {
+        trimmed.to_string()
+    } else {
+        format!("/{trimmed}")
+    }
+}
+
 /// Percent-decode a URL path segment in-place (ASCII-only fast path).
 fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
@@ -525,6 +546,107 @@ mod tests {
             .route("/", crate::get(h))
             .route("/{id}", crate::get(h));
         let _: Router<()> = Router::new().route("/", crate::get(h)).nest("/users", sub);
+    }
+
+    #[tokio::test]
+    async fn nest_service_strips_prefix_and_preserves_query_and_original_uri() {
+        use std::convert::Infallible;
+        use std::future::{Ready, ready};
+        use std::task::{Context, Poll};
+
+        use arvik_core::{Body, OriginalUri, Request, ResponseBuilder};
+        use tower_service::Service;
+
+        #[derive(Clone)]
+        struct EchoUri;
+
+        impl Service<Request> for EchoUri {
+            type Response = arvik_core::Response;
+            type Error = Infallible;
+            type Future = Ready<Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, req: Request) -> Self::Future {
+                let original = req
+                    .extensions()
+                    .get::<OriginalUri>()
+                    .map(|uri| uri.0.to_string())
+                    .unwrap_or_default();
+                ready(Ok(ResponseBuilder::new().text(format!(
+                    "{}|{}",
+                    req.uri(),
+                    original
+                ))))
+            }
+        }
+
+        let mut app = Router::new()
+            .nest_service("/static", EchoUri)
+            .into_service();
+
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/static/app.css?v=1")
+                .body(Body::empty())
+                .unwrap(),
+        );
+        let res = app.call(req).await.unwrap();
+        assert_eq!(
+            res.into_body().to_string().await.unwrap(),
+            "/app.css?v=1|/static/app.css?v=1"
+        );
+    }
+
+    #[tokio::test]
+    async fn nest_service_handles_mount_root_and_slash() {
+        use std::convert::Infallible;
+        use std::future::{Ready, ready};
+        use std::task::{Context, Poll};
+
+        use arvik_core::{Body, Request, ResponseBuilder};
+        use tower_service::Service;
+
+        #[derive(Clone)]
+        struct EchoPath;
+
+        impl Service<Request> for EchoPath {
+            type Response = arvik_core::Response;
+            type Error = Infallible;
+            type Future = Ready<Result<Self::Response, Self::Error>>;
+
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                Poll::Ready(Ok(()))
+            }
+
+            fn call(&mut self, req: Request) -> Self::Future {
+                ready(Ok(ResponseBuilder::new().text(req.uri().path().to_string())))
+            }
+        }
+
+        let mut app = Router::new()
+            .nest_service("/static", EchoPath)
+            .into_service();
+
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/static")
+                .body(Body::empty())
+                .unwrap(),
+        );
+        let res = app.call(req).await.unwrap();
+        assert_eq!(res.into_body().to_string().await.unwrap(), "/");
+
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/static/")
+                .body(Body::empty())
+                .unwrap(),
+        );
+        let res = app.call(req).await.unwrap();
+        assert_eq!(res.into_body().to_string().await.unwrap(), "/");
     }
 
     #[test]

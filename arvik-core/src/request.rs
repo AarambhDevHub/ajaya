@@ -16,6 +16,33 @@
 use http::Extensions;
 
 use crate::Body;
+use crate::extract::FromRequestParts;
+use crate::request_parts::RequestParts;
+
+/// Original request URI before framework path rewrites.
+///
+/// Routers and mounted services can store this extension before rewriting
+/// `Request::uri_mut()`. Extractors fall back to the current URI when it is
+/// not present.
+#[derive(Debug, Clone)]
+pub struct OriginalUri(pub http::Uri);
+
+impl<S: Send + Sync> FromRequestParts<S> for OriginalUri {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut RequestParts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let uri = parts
+            .extensions()
+            .get::<OriginalUri>()
+            .map(|original| original.0.clone())
+            .unwrap_or_else(|| parts.uri().clone());
+
+        Ok(OriginalUri(uri))
+    }
+}
 
 /// Arvik's HTTP request type.
 ///
@@ -52,9 +79,19 @@ impl<B> Request<B> {
         self.inner.method()
     }
 
+    /// Returns a mutable reference to the HTTP method.
+    pub fn method_mut(&mut self) -> &mut http::Method {
+        self.inner.method_mut()
+    }
+
     /// Returns the URI of this request.
     pub fn uri(&self) -> &http::Uri {
         self.inner.uri()
+    }
+
+    /// Returns a mutable reference to the URI.
+    pub fn uri_mut(&mut self) -> &mut http::Uri {
+        self.inner.uri_mut()
     }
 
     /// Returns the HTTP version of this request.
