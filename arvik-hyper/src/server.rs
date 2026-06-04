@@ -1,54 +1,50 @@
 //! Server implementation using Hyper 1.x and Tokio.
-//!
-//! Provides a TCP listener that accepts connections and serves
-//! HTTP responses using Hyper's connection builder.
 
+use std::convert::Infallible;
+use std::future::Future;
+use std::marker::PhantomData;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 use arvik_core::Body;
 use arvik_core::handler::Handler;
+use arvik_core::{Request, Response};
 use arvik_router::layer::BoxCloneService;
 use arvik_router::{MethodRouter, Router};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
-use hyper_util::rt::{TokioExecutor, TokioIo};
-use hyper_util::server::conn::auto::Builder;
+use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tower_service::Service as _;
 
+use crate::ServerConfig;
+
+type BoxError = Box<dyn std::error::Error + Send + Sync>;
+
 /// The Arvik HTTP server.
-///
-/// Wraps a Tokio TCP listener and Hyper connection builder
-/// to accept and serve HTTP connections.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// use arvik_hyper::Server;
-///
-/// async fn hello() -> &'static str { "Hello!" }
-///
-/// #[tokio::main]
-/// async fn main() {
-///     let server = Server::bind("0.0.0.0:8080").await.unwrap();
-///     server.serve(hello).await.unwrap();
-/// }
-/// ```
 pub struct Server {
     listener: TcpListener,
     addr: SocketAddr,
+    config: ServerConfig,
 }
 
 impl Server {
-    /// Bind the server to the given address.
-    ///
-    /// Returns a `Server` ready to accept connections.
-    pub async fn bind(addr: &str) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    /// Bind the server to the given address with default runtime/protocol tuning.
+    pub async fn bind(addr: &str) -> Result<Self, BoxError> {
+        Self::bind_with_config(addr, ServerConfig::default()).await
+    }
+
+    /// Bind the server to the given address with explicit runtime/protocol tuning.
+    pub async fn bind_with_config(addr: &str, config: ServerConfig) -> Result<Self, BoxError> {
         let listener = TcpListener::bind(addr).await?;
         let addr = listener.local_addr()?;
-        tracing::info!("⚡ Arvik listening on http://{}", addr);
-        Ok(Self { listener, addr })
+        tracing::info!("Arvik listening on http://{}", addr);
+        Ok(Self {
+            listener,
+            addr,
+            config,
+        })
     }
 
     /// Returns the local address the server is bound to.
@@ -56,143 +52,217 @@ impl Server {
         self.addr
     }
 
-    // ── Serve methods ────────────────────────────────────────────────────────
+    /// Returns the server runtime/protocol tuning.
+    pub fn config(&self) -> &ServerConfig {
+        &self.config
+    }
 
     /// Serve any pre-built Tower [`BoxCloneService`].
-    ///
-    /// This is the lowest-level serve method. Use it when you've composed
-    /// middleware manually via `router.into_service()` and want full control.
-    ///
-    /// # Example
-    ///
-    /// ```rust,ignore
-    /// let svc = app
-    ///     .layer(CorsLayer::permissive())
-    ///     .with_state(state)
-    ///     .into_service();
-    ///
-    /// Server::bind("0.0.0.0:8080").await?.serve_service(svc).await?;
-    /// ```
-    pub async fn serve_service(
-        self,
-        service: BoxCloneService,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn serve_service(self, service: BoxCloneService) -> Result<(), BoxError> {
         loop {
             let (stream, peer_addr) = self.listener.accept().await?;
             let io = TokioIo::new(stream);
-            let svc = service.clone();
+            let service = service.clone();
+            let config = self.config.clone();
 
             tracing::debug!("Accepted connection from {}", peer_addr);
 
-            tokio::task::spawn(async move {
-                // let svc = svc;
-                let hyper_svc = service_fn(move |req: hyper::Request<Incoming>| {
-                    let mut s = svc.clone();
-                    async move {
-                        let arvik_req = arvik_core::Request::from_hyper(req);
-                        // poll_ready is always Poll::Ready for our services
-                        let _ = std::future::poll_fn(|cx| s.poll_ready(cx)).await;
-                        let response = s
-                            .call(arvik_req)
-                            .await
-                            .unwrap_or_else(|infallible| match infallible {});
-                        Ok::<http::Response<Body>, hyper::Error>(response)
-                    }
-                });
-
-                if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection_with_upgrades(io, hyper_svc)
-                    .await
-                {
-                    tracing::error!("Connection error: {}", err);
-                }
+            tokio::spawn(async move {
+                run_connection(io, service, config, peer_addr).await;
             });
         }
     }
 
     /// Serve a [`Router`] with all configured layers applied.
-    ///
-    /// Calls [`Router::into_service`] internally. This is the recommended
-    /// entry point for most applications.
-    pub async fn serve_app(
-        self,
-        router: Router,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let svc = router.into_service();
-        self.serve_service(svc).await
+    pub async fn serve_app(self, router: Router) -> Result<(), BoxError> {
+        self.serve_service(router.into_service()).await
     }
 
     /// Serve a bare async handler (no routing, no layers).
-    ///
-    /// Useful for simple single-handler servers or testing.
-    pub async fn serve<H, T>(
-        self,
-        handler: H,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>
+    pub async fn serve<H, T>(self, handler: H) -> Result<(), BoxError>
     where
         H: Handler<T> + Clone + Send + Sync + 'static,
         T: 'static,
     {
+        self.serve_service(BoxCloneService::new(HandlerService {
+            handler,
+            _marker: PhantomData,
+        }))
+        .await
+    }
+
+    /// Serve a [`MethodRouter`] (single path, method dispatch).
+    pub async fn serve_method_router(self, router: MethodRouter) -> Result<(), BoxError> {
+        self.serve_service(BoxCloneService::new(MethodRouterService { router }))
+            .await
+    }
+
+    /// Serve a [`Router`] over rustls TLS.
+    #[cfg(feature = "tls")]
+    pub async fn serve_tls_app(
+        self,
+        router: Router,
+        tls_config: arvik_tls::rustls::RustlsConfig,
+    ) -> Result<(), BoxError> {
+        self.serve_tls_service(router.into_service(), tls_config)
+            .await
+    }
+
+    /// Serve any pre-built Tower service over rustls TLS.
+    #[cfg(feature = "tls")]
+    pub async fn serve_tls_service(
+        self,
+        service: BoxCloneService,
+        tls_config: arvik_tls::rustls::RustlsConfig,
+    ) -> Result<(), BoxError> {
         loop {
             let (stream, peer_addr) = self.listener.accept().await?;
-            let io = TokioIo::new(stream);
-            let handler = handler.clone();
+            let service = service.clone();
+            let tls_config = tls_config.clone();
+            let config = self.config.clone();
 
-            tracing::debug!("Accepted connection from {}", peer_addr);
+            tracing::debug!("Accepted TLS connection from {}", peer_addr);
 
-            tokio::task::spawn(async move {
-                let handler = handler.clone();
-                let hyper_svc = service_fn(move |req: hyper::Request<Incoming>| {
-                    let handler = handler.clone();
-                    async move {
-                        let arvik_req = arvik_core::Request::from_hyper(req);
-                        let response = handler.call(arvik_req, ()).await;
-                        Ok::<http::Response<Body>, hyper::Error>(response)
+            tokio::spawn(async move {
+                match tls_config.accept(stream).await {
+                    Ok(tls_stream) => {
+                        run_connection(TokioIo::new(tls_stream), service, config, peer_addr).await;
                     }
-                });
-
-                if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection_with_upgrades(io, hyper_svc)
-                    .await
-                {
-                    tracing::error!("Connection error: {}", err);
+                    Err(err) => tracing::warn!("TLS handshake failed from {}: {}", peer_addr, err),
                 }
             });
         }
     }
 
-    /// Serve a [`MethodRouter`] (single path, method dispatch).
-    pub async fn serve_method_router(
+    /// Serve a [`Router`] over native-tls.
+    #[cfg(feature = "native-tls")]
+    pub async fn serve_native_tls_app(
         self,
-        router: MethodRouter,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let router = Arc::new(router);
+        router: Router,
+        tls_config: arvik_tls::native::NativeTlsConfig,
+    ) -> Result<(), BoxError> {
+        self.serve_native_tls_service(router.into_service(), tls_config)
+            .await
+    }
 
+    /// Serve any pre-built Tower service over native-tls.
+    #[cfg(feature = "native-tls")]
+    pub async fn serve_native_tls_service(
+        self,
+        service: BoxCloneService,
+        tls_config: arvik_tls::native::NativeTlsConfig,
+    ) -> Result<(), BoxError> {
         loop {
             let (stream, peer_addr) = self.listener.accept().await?;
-            let io = TokioIo::new(stream);
-            let router = Arc::clone(&router);
+            let service = service.clone();
+            let tls_config = tls_config.clone();
+            let config = self.config.clone();
 
-            tracing::debug!("Accepted connection from {}", peer_addr);
+            tracing::debug!("Accepted native-tls connection from {}", peer_addr);
 
-            tokio::task::spawn(async move {
-                let router = Arc::clone(&router);
-                let hyper_svc = service_fn(move |req: hyper::Request<Incoming>| {
-                    let router = Arc::clone(&router);
-                    async move {
-                        let arvik_req = arvik_core::Request::from_hyper(req);
-                        let response = router.call(arvik_req, ()).await;
-                        Ok::<http::Response<Body>, hyper::Error>(response)
+            tokio::spawn(async move {
+                match tls_config.accept(stream).await {
+                    Ok(tls_stream) => {
+                        run_connection(TokioIo::new(tls_stream), service, config, peer_addr).await;
                     }
-                });
-
-                if let Err(err) = Builder::new(TokioExecutor::new())
-                    .serve_connection_with_upgrades(io, hyper_svc)
-                    .await
-                {
-                    tracing::error!("Connection error: {}", err);
+                    Err(err) => {
+                        tracing::warn!("native-tls handshake failed from {}: {}", peer_addr, err)
+                    }
                 }
             });
         }
+    }
+}
+
+async fn run_connection<I>(
+    io: I,
+    service: BoxCloneService,
+    config: ServerConfig,
+    peer_addr: SocketAddr,
+) where
+    I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
+{
+    let hyper_svc = service_fn(move |req: hyper::Request<Incoming>| {
+        let mut service = service.clone();
+        async move {
+            let arvik_req = Request::from_hyper(req);
+            let _ = std::future::poll_fn(|cx| service.poll_ready(cx)).await;
+            let response = service
+                .call(arvik_req)
+                .await
+                .unwrap_or_else(|infallible| match infallible {});
+            Ok::<http::Response<Body>, Infallible>(response)
+        }
+    });
+
+    let builder = config.auto_builder();
+    let result = if config.is_http2_only() {
+        builder.serve_connection(io, hyper_svc).await
+    } else {
+        builder.serve_connection_with_upgrades(io, hyper_svc).await
+    };
+
+    if let Err(err) = result {
+        tracing::error!("Connection error from {}: {}", peer_addr, err);
+    }
+}
+
+struct HandlerService<H, T> {
+    handler: H,
+    _marker: PhantomData<fn() -> T>,
+}
+
+impl<H: Clone, T> Clone for HandlerService<H, T> {
+    fn clone(&self) -> Self {
+        Self {
+            handler: self.handler.clone(),
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<H, T> tower_service::Service<Request> for HandlerService<H, T>
+where
+    H: Handler<T> + Clone + Send + Sync + 'static,
+    T: 'static,
+{
+    type Response = Response;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let handler = self.handler.clone();
+        Box::pin(async move { Ok(handler.call(req, ()).await) })
+    }
+}
+
+struct MethodRouterService {
+    router: MethodRouter,
+}
+
+impl Clone for MethodRouterService {
+    fn clone(&self) -> Self {
+        Self {
+            router: self.router.clone(),
+        }
+    }
+}
+
+impl tower_service::Service<Request> for MethodRouterService {
+    type Response = Response;
+    type Error = Infallible;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Request) -> Self::Future {
+        let router = self.router.clone();
+        Box::pin(async move { Ok(router.call(req, ()).await) })
     }
 }

@@ -1,0 +1,15 @@
+[package]
+name = "tls-hot-reload"
+version = "0.6.3"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "rustls TLS hot reload example for Arvik"
+
+[[bin]]
+name = "tls_hot_reload"
+path = "src/main.rs"
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["tls-hot-reload"] }
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3"

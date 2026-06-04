@@ -45,9 +45,10 @@
 //! ```
 
 use bytes::Bytes;
-use http::StatusCode;
+use http::{HeaderMap, StatusCode};
+use http_body_util::BodyExt as _;
 
-use crate::body::Body;
+use crate::body::{Body, BoxError};
 // IntoResponseParts is imported only for the blanket impls below.
 use crate::into_response_parts::{IntoResponseParts, apply_parts};
 use crate::response::{Response, ResponseBuilder};
@@ -78,6 +79,50 @@ use crate::response::{Response, ResponseBuilder};
 pub trait IntoResponse {
     /// Convert this value into an HTTP [`Response`].
     fn into_response(self) -> Response;
+}
+
+// ---------------------------------------------------------------------------
+// Trailers
+// ---------------------------------------------------------------------------
+
+/// Attach HTTP trailers to a response body.
+///
+/// This stays intentionally small: trailers are appended after the wrapped
+/// response body and are only useful for protocols that support trailers,
+/// primarily HTTP/2. Intermediaries and HTTP/1 clients may ignore them.
+#[derive(Debug, Clone)]
+pub struct Trailers<R> {
+    response: R,
+    trailers: HeaderMap,
+}
+
+impl<R> Trailers<R> {
+    /// Create a response wrapper with trailers.
+    pub fn new(response: R, trailers: HeaderMap) -> Self {
+        Self { response, trailers }
+    }
+
+    /// Return the wrapped response value.
+    pub fn response(&self) -> &R {
+        &self.response
+    }
+
+    /// Return the trailers.
+    pub fn trailers(&self) -> &HeaderMap {
+        &self.trailers
+    }
+}
+
+impl<R: IntoResponse> IntoResponse for Trailers<R> {
+    fn into_response(self) -> Response {
+        let response = self.response.into_response();
+        let (parts, body) = response.into_parts();
+        let trailers = self.trailers;
+        let body = body.with_trailers(std::future::ready(Some(Ok::<HeaderMap, BoxError>(
+            trailers,
+        ))));
+        Response::from_parts(parts, Body::new(body))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -270,6 +315,24 @@ where
     fn into_response(self) -> Response {
         let (parts, body) = self;
         apply_parts(parts, body.into_response())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn trailers_are_appended_after_body() {
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-checksum", "abc123".parse().unwrap());
+
+        let response = Trailers::new("body", trailers).into_response();
+        let collected = response.into_body().collect().await.unwrap();
+        let collected_trailers = collected.trailers().cloned().unwrap();
+
+        assert_eq!(collected_trailers.get("x-checksum").unwrap(), "abc123");
+        assert_eq!(collected.to_bytes(), Bytes::from_static(b"body"));
     }
 }
 

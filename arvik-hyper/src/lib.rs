@@ -22,8 +22,19 @@
 //! }
 //! ```
 
+pub mod config;
 pub mod serve;
 pub mod server;
 
-pub use serve::{serve, serve_app, serve_router};
+pub use config::ServerConfig;
+pub use serve::{
+    serve, serve_app, serve_handler_with_config, serve_router, serve_router_with_config,
+    serve_service, serve_service_with_config, serve_with_config,
+};
+#[cfg(feature = "http2")]
+pub use serve::{serve_h2c, serve_h2c_with_config};
+#[cfg(feature = "native-tls")]
+pub use serve::{serve_native_tls, serve_native_tls_with_config};
+#[cfg(feature = "tls")]
+pub use serve::{serve_tls, serve_tls_with_config};
 pub use server::Server;

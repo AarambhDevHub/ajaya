@@ -1,0 +1,15 @@
+[package]
+name = "tls-rustls"
+version = "0.6.3"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "rustls TLS example for Arvik"
+
+[[bin]]
+name = "tls_rustls"
+path = "src/main.rs"
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["tls"] }
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = "0.3"

@@ -74,10 +74,13 @@ pub use arvik_core::RequestParts;
 pub use arvik_core::Response;
 pub use arvik_core::ResponseBuilder;
 pub use arvik_core::StreamBody;
+pub use arvik_core::Trailers;
 
 // IntoResponseParts system
 pub use arvik_core::AppendHeaders; // 0.3.2
 pub use arvik_core::IntoResponseParts; // 0.3.2
+pub use arvik_core::Preload;
+pub use arvik_core::PreloadLink;
 pub use arvik_core::ResponseParts; // 0.3.2
 
 // Extractor traits
@@ -146,7 +149,32 @@ pub use arvik_extract::rejection;
 // Server functionality
 // ---------------------------------------------------------------------------
 pub use arvik_hyper::Server;
-pub use arvik_hyper::{serve, serve_app, serve_router};
+pub use arvik_hyper::ServerConfig;
+pub use arvik_hyper::{serve, serve_app, serve_router, serve_with_config};
+#[cfg(feature = "http2")]
+pub use arvik_hyper::{serve_h2c, serve_h2c_with_config};
+#[cfg(feature = "native-tls")]
+pub use arvik_hyper::{serve_native_tls, serve_native_tls_with_config};
+#[cfg(feature = "tls")]
+pub use arvik_hyper::{serve_tls, serve_tls_with_config};
+
+// ---------------------------------------------------------------------------
+// TLS support (0.6.x)
+// ---------------------------------------------------------------------------
+
+#[cfg(any(feature = "tls", feature = "native-tls"))]
+pub mod tls {
+    #[cfg(feature = "native-tls")]
+    pub use arvik_tls::native;
+    #[cfg(feature = "tls")]
+    pub use arvik_tls::rustls;
+    pub use arvik_tls::{TlsError, TlsFilePaths};
+}
+
+#[cfg(feature = "native-tls")]
+pub use arvik_tls::native::NativeTlsConfig;
+#[cfg(feature = "tls")]
+pub use arvik_tls::rustls::RustlsConfig;
 
 // ---------------------------------------------------------------------------
 // Middleware  (0.4.x)
@@ -231,7 +259,7 @@ pub use arvik_router::layer::{BoxCloneService, LayerFn};
 ///
 /// Enabled by the `ws` feature (on by default). Disable with:
 /// ```toml
-/// arvik = { version = "0.5", default-features = false }
+/// arvik = { version = "0.6", default-features = false }
 /// ```
 ///
 /// # Quick start
@@ -269,7 +297,7 @@ pub use arvik_ws::{Message as WsMessage, WebSocket, WebSocketUpgrade};
 /// Enable via the `sse` feature flag:
 ///
 /// ```toml
-/// arvik = { version = "0.5", features = ["sse"] }
+/// arvik = { version = "0.6", features = ["sse"] }
 /// ```
 ///
 /// # Quick start

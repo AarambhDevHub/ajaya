@@ -10,3 +10,29 @@ readme.workspace = true
 description = "TLS support (rustls + native-tls) for the Arvik web framework"
 
 [dependencies]
+tokio            = { workspace = true }
+rustls           = { workspace = true, optional = true }
+tokio-rustls     = { workspace = true, optional = true }
+rustls-pemfile   = { workspace = true, optional = true }
+rcgen            = { workspace = true, optional = true }
+notify           = { workspace = true, optional = true }
+x509-parser      = { workspace = true, optional = true }
+native-tls       = { workspace = true, optional = true }
+tokio-native-tls = { workspace = true, optional = true }
+parking_lot      = { workspace = true, optional = true }
+thiserror        = { workspace = true }
+tracing          = { workspace = true }
+
+[features]
+default = []
+rustls = [
+    "dep:rustls",
+    "dep:tokio-rustls",
+    "dep:rustls-pemfile",
+    "dep:rcgen",
+    "dep:x509-parser",
+    "dep:parking_lot",
+]
+tls-hot-reload = ["rustls", "dep:notify"]
+native-tls = ["dep:native-tls", "dep:tokio-native-tls"]
+native-tls-vendored = ["native-tls", "native-tls/vendored"]

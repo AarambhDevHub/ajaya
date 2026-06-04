@@ -9,4 +9,4 @@
 //! - Range requests (206)
 //! - Pre-compressed file support (.gz, .br)
 //!
-//! **Status:** Stub — implementation coming in v0.6.x
+//! **Status:** Stub — implementation coming in v0.6.4

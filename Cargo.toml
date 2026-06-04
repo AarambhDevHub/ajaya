@@ -1,4 +1,14 @@
 [workspace]
+resolver = "2"
+exclude = [
+    "examples/websocket_chat",
+    "examples/rest_api",
+    "examples/sse_demo",
+    "examples/tls_rustls",
+    "examples/tls_hot_reload",
+    "examples/native_tls",
+    "examples/h2c",
+]
 members = [
     "arvik",
     "arvik-core",
@@ -12,15 +22,10 @@ members = [
     "arvik-tls",
     "arvik-macros",
     "arvik-test",
-    # Examples
-    "examples/websocket_chat",
-    "examples/rest_api",
-    "examples/sse_demo",
 ]
-resolver = "2"
 
 [workspace.package]
-version = "0.5.2"
+version = "0.6.3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme       = "README.md"
@@ -35,7 +40,7 @@ tokio          = { version = "1", features = ["full"] }
 tokio-stream   = "0.1"
 
 # HTTP
-hyper          = { version = "1", features = ["server", "http1", "http2"] }
+hyper          = { version = "1", features = ["client", "server", "http1", "http2"] }
 hyper-util     = { version = "0.1", features = ["tokio", "server-auto", "http1", "http2"] }
 http           = "1"
 http-body      = "1"
@@ -62,6 +67,11 @@ tokio-tungstenite = "0.24"
 rustls         = "0.23"
 tokio-rustls   = "0.26"
 rustls-pemfile = "2"
+rcgen          = "0.14"
+notify         = "8"
+x509-parser    = "0.18"
+native-tls     = { version = "0.2", features = ["alpn", "alpn-accept"] }
+tokio-native-tls = "0.3"
 
 # Multipart
 multer         = "3"
@@ -105,14 +115,14 @@ base64 = "0.22"
 sha1 = "0.10"
 
 # Internal crates
-arvik-core       = { path = "arvik-core", version = "0.5.2" }
-arvik-router     = { path = "arvik-router", version = "0.5.2" }
-arvik-hyper      = { path = "arvik-hyper", version = "0.5.2" }
-arvik-extract    = { path = "arvik-extract", version = "0.5.2" }
-arvik-middleware = { path = "arvik-middleware", version = "0.5.2" }
-arvik-ws         = { path = "arvik-ws", version = "0.5.2" }
-arvik-sse        = { path = "arvik-sse", version = "0.5.2" }
-arvik-static     = { path = "arvik-static", version = "0.5.2" }
-arvik-tls        = { path = "arvik-tls", version = "0.5.2" }
-arvik-macros     = { path = "arvik-macros", version = "0.5.2" }
-arvik-test       = { path = "arvik-test", version = "0.5.2" }
+arvik-core       = { path = "arvik-core", version = "0.6.3" }
+arvik-router     = { path = "arvik-router", version = "0.6.3" }
+arvik-hyper      = { path = "arvik-hyper", version = "0.6.3" }
+arvik-extract    = { path = "arvik-extract", version = "0.6.3" }
+arvik-middleware = { path = "arvik-middleware", version = "0.6.3" }
+arvik-ws         = { path = "arvik-ws", version = "0.6.3" }
+arvik-sse        = { path = "arvik-sse", version = "0.6.3" }
+arvik-static     = { path = "arvik-static", version = "0.6.3" }
+arvik-tls        = { path = "arvik-tls", version = "0.6.3" }
+arvik-macros     = { path = "arvik-macros", version = "0.6.3" }
+arvik-test       = { path = "arvik-test", version = "0.6.3" }

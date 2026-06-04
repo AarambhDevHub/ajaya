@@ -12,6 +12,7 @@ description = "Hyper server integration for the Arvik web framework"
 [dependencies]
 arvik-core     = { workspace = true }
 arvik-router   = { workspace = true }
+arvik-tls      = { workspace = true, optional = true }
 tokio          = { workspace = true }
 hyper          = { workspace = true }
 hyper-util     = { workspace = true }
@@ -21,3 +22,12 @@ http-body-util = { workspace = true }
 bytes          = { workspace = true }
 tracing        = { workspace = true }
 tower-service  = { workspace = true }
+
+[features]
+default = ["http1", "http2"]
+http1 = ["hyper/http1", "hyper-util/http1"]
+http2 = ["hyper/http2", "hyper-util/http2"]
+tls = ["dep:arvik-tls", "arvik-tls/rustls"]
+tls-hot-reload = ["tls", "arvik-tls/tls-hot-reload"]
+native-tls = ["dep:arvik-tls", "arvik-tls/native-tls"]
+native-tls-vendored = ["native-tls", "arvik-tls/native-tls-vendored"]

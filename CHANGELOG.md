@@ -9,6 +9,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.3] — 2026-06-03 — HTTP/2 Tuning
+
+### Added
+
+- `arvik_hyper::ServerConfig` for low-level connection/protocol tuning only.
+- `serve_with_config`, `serve_h2c`, and `serve_h2c_with_config` app-serving APIs.
+- HTTP/2 tuning for adaptive windows, stream/connection window sizes, concurrent streams,
+  keep-alive, frame size, send buffer size, and header list size.
+- `Trailers` response wrapper for protocols that support HTTP trailers.
+- `Preload` and `PreloadLink` helpers that emit `Link: rel=preload` headers.
+- `examples/h2c` with the `http2` feature.
+- h2c integration test using Hyper's HTTP/2 prior-knowledge client.
+
+### Changed
+
+- Real HTTP/2 push promises are documented as unsupported/deprecated in Arvik Hyper mode;
+  use `Preload` / `PreloadLink` instead.
+- File/env configuration remains deferred to the future `0.7.4` configuration system.
+
+---
+
+## [0.6.2] — 2026-06-03 — native-tls Backend
+
+### Added
+
+- Optional `native-tls` backend with `NativeTlsConfig::from_pkcs12` and
+  `NativeTlsConfig::from_pkcs12_file`.
+- `serve_native_tls` and `serve_native_tls_with_config` app-serving APIs.
+- `native-tls-vendored` feature forwarding to `native-tls/vendored`.
+- `examples/native_tls` with the `native-tls` feature.
+
+### Changed
+
+- Native TLS ALPN is best-effort and platform-dependent. Rustls remains the guaranteed
+  HTTP/2 ALPN backend; native TLS falls back cleanly to HTTP/1.1 when h2 ALPN is unavailable.
+
+---
+
+## [0.6.1] — 2026-06-03 — TLS Hot Reload
+
+### Added
+
+- `RustlsConfig::reload_from_pem_file` and `RustlsConfig::reload_from_pem`.
+- `RustlsConfig::watch_pem_files` behind the `tls-hot-reload` feature.
+- Debounced certificate/key file watching via `notify`.
+- Certificate expiry warnings when the leaf certificate is close to expiration.
+- `examples/tls_hot_reload` with the `tls-hot-reload` feature.
+
+### Changed
+
+- Failed reloads keep the previous TLS config active.
+- Existing accepted sessions keep using their original config; only new connections see reloads.
+
+---
+
+## [0.6.0] — 2026-06-03 — rustls TLS
+
+### Added
+
+- `arvik-tls` rustls backend with `RustlsConfig`.
+- `RustlsConfig::from_pem_file`, `RustlsConfig::from_pem`, `RustlsConfig::from_der`,
+  and `RustlsConfig::self_signed`.
+- `serve_tls` and `serve_tls_with_config` app-serving APIs.
+- ALPN order `h2`, then `http/1.1`.
+- `tls` feature forwarding across `arvik`, `arvik-hyper`, and `arvik-tls`.
+- `examples/tls_rustls` with the `tls` feature.
+
+### Changed
+
+- Workspace version bumped to `0.6.3`.
+
+---
+
 ## [0.5.2] — 2026-05-20 — Multipart Polish
 
 ### Added

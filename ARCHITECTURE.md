@@ -1015,7 +1015,7 @@ Router::new()
 
 ```rust
 // arvik-tls — rustls backend
-use arvik_tls::rustls::{RustlsConfig, SelfSignedCert};
+use arvik_tls::rustls::RustlsConfig;
 
 // From PEM files
 let config = RustlsConfig::from_pem_file("cert.pem", "key.pem").await?;
@@ -1028,15 +1028,26 @@ let config = RustlsConfig::self_signed(["localhost", "127.0.0.1"]).await?;
 
 // Serve
 arvik::serve_tls(app, "0.0.0.0:443", config).await?;
+arvik::serve_tls_with_config(app, "0.0.0.0:443", config, ServerConfig::new()).await?;
 
 // Hot reload TLS certs without restart
 let config = RustlsConfig::from_pem_file("cert.pem", "key.pem").await?;
 config.reload_from_pem_file("cert.pem", "key.pem").await?;
+let _watcher = config.watch_pem_files(
+    "cert.pem",
+    "key.pem",
+    Duration::from_secs(1),
+)?;
 
 // native-tls backend (OpenSSL / SChannel / Secure Transport)
 use arvik_tls::native::{NativeTlsConfig};
 let config = NativeTlsConfig::from_pkcs12("identity.p12", "password")?;
+arvik::serve_native_tls(app, "0.0.0.0:443", config).await?;
 ```
+
+Rustls is the primary guaranteed HTTP/2 ALPN backend. Native TLS enables ALPN
+best-effort where the platform backend supports it and falls back cleanly to
+HTTP/1.1 otherwise.
 
 ---
 
@@ -1049,6 +1060,7 @@ arvik::serve_tls(app, addr, config).await?;  // auto-negotiates h1/h2
 
 // HTTP/2 over cleartext (h2c) — for internal services / proxies
 arvik::serve_h2c(app, addr).await?;
+arvik::serve_h2c_with_config(app, addr, ServerConfig::new()).await?;
 
 // HTTP/3 (QUIC via quinn — feature flag)
 #[cfg(feature = "http3")]
@@ -1065,6 +1077,14 @@ ServerConfig::new()
     .http2_max_concurrent_streams(1000)
     .http2_max_header_list_size(64 * 1024)
 ```
+
+`ServerConfig` is only for low-level runtime/server tuning. File/env config
+loading, including `arvik.toml`, belongs to the future 0.7.4 configuration
+system.
+
+HTTP/2 push promises are not implemented in Arvik Hyper mode because browser
+support is deprecated and Hyper's service API does not expose a stable push
+surface. Use `Preload` / `PreloadLink` to emit `Link: rel=preload` headers.
 
 ---
 
@@ -1189,9 +1209,12 @@ impl RateLimitedHandler {
 
 ```rust
 // arvik::config
+// Future 0.7.4 file/env application config.
+// This is separate from arvik_hyper::ServerConfig, which is only
+// low-level connection/protocol tuning.
 
 #[derive(Debug, Deserialize)]
-pub struct ServerConfig {
+pub struct AppConfig {
     pub host: String,
     pub port: u16,
     pub workers: Option<usize>,           // defaults to num CPUs
