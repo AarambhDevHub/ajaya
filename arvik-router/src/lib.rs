@@ -33,4 +33,4 @@ pub use method_router::{
     MethodRouter, any, delete, get, head, on, options, patch, post, put, trace_method,
 };
 pub use params::PathParams;
-pub use router::{MatchedPathExt, Router};
+pub use router::{CollectedRoutes, MatchedPathExt, RouteMeta, Router, assert_no_route_conflicts};

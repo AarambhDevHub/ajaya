@@ -1,0 +1,11 @@
+error: handlers can have only one body-consuming extractor
+ --> tests/ui/macros/fail/debug_multiple_body.rs:4:14
+  |
+4 | async fn bad(first: String, second: arvik::Body) -> String {
+  |              ^^^^^
+
+error: body-consuming extractors must be the last handler argument
+ --> tests/ui/macros/fail/debug_multiple_body.rs:4:21
+  |
+4 | async fn bad(first: String, second: arvik::Body) -> String {
+  |                     ^^^^^^

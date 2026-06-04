@@ -9,6 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.2] — 2026-06-04 — `#[handler]` Macro
+
+### Added
+
+- `#[arvik::handler]` for inherent impl blocks with `async fn call(&self, req: Request)`.
+- Struct-based handlers now implement `Handler<(Request,), S>` and can be registered with
+  existing router method helpers.
+- `examples/handler_macro` with the `macros` feature.
+
+### Changed
+
+- Workspace version bumped to `0.7.2`.
+
+---
+
+## [0.7.1] — 2026-06-04 — `#[route]` Macro
+
+### Added
+
+- `#[arvik::route(GET, "/path")]` and shorthand route attributes such as
+  `#[arvik::get("/path")]` and `#[arvik::post("/path")]`.
+- `arvik::collect_routes![...]` and `Router::routes(...)` for collected route registration.
+- Compile-time duplicate path/method detection within a collected route set.
+- Route macro support for both `{id}` and simple `:id` path parameter segments.
+- `examples/route_macro` with the `macros` feature.
+
+---
+
+## [0.7.0] — 2026-06-04 — `#[debug_handler]` Macro
+
+### Added
+
+- `#[arvik::debug_handler]` with optional `state = AppState` for clearer handler diagnostics.
+- Compile-time checks for non-async handlers, missing state annotations, extractor count,
+  body extractor ordering, and extractor trait bounds.
+- `examples/debug_handler` with the `macros` feature.
+
+---
+
 ## [0.6.5] — 2026-06-04 — Embedded Static Files
 
 ### Added

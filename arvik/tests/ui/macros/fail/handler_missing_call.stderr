@@ -1,0 +1,5 @@
+error: #[handler] requires an async fn call(&self, req: arvik::Request)
+ --> tests/ui/macros/fail/handler_missing_call.rs:5:6
+  |
+5 | impl BadHandler {
+  |      ^^^^^^^^^^

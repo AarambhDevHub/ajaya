@@ -638,12 +638,12 @@
 ### `0.7.0` — `#[debug_handler]` Macro
 **Goal:** Dramatically better compile errors.
 
-- [ ] `arvik-macros`: `#[debug_handler]` proc macro
-- [ ] Points error at the offending extractor, not at `.route()` call site
-- [ ] Detects multiple body extractors
-- [ ] Detects missing state
-- [ ] Error if state not set: clear compile-time message via `#[debug_handler]`
-- [ ] Works with all extractor types
+- [x] `arvik-macros`: `#[debug_handler]` proc macro
+- [x] Points error at the offending extractor, not at `.route()` call site
+- [x] Detects multiple body extractors
+- [x] Detects missing state
+- [x] Error if state not set: clear compile-time message via `#[debug_handler]`
+- [x] Works with all extractor types
 
 **Deliverable:** A wrong handler signature gives a clear error with line number.
 
@@ -652,11 +652,11 @@
 ### `0.7.1` — `#[route]` Macro
 **Goal:** Attach routing metadata to functions.
 
-- [ ] `#[route(GET, "/path")]` attribute macro
-- [ ] `#[get("/path")]`, `#[post("/path")]` shorthand macros
-- [ ] `arvik::collect_routes![fn1, fn2, fn3]` — gather all annotated handlers
-- [ ] `Router::routes(collected)` — register all at once
-- [ ] Conflict detection at macro expansion time
+- [x] `#[route(GET, "/path")]` attribute macro
+- [x] `#[get("/path")]`, `#[post("/path")]` shorthand macros
+- [x] `arvik::collect_routes![fn1, fn2, fn3]` — gather all annotated handlers
+- [x] `Router::routes(collected)` — register all at once
+- [x] Conflict detection at macro expansion time
 
 **Deliverable:** Actix-style attribute routing works as an opt-in style.
 
@@ -665,9 +665,9 @@
 ### `0.7.2` — `#[handler]` Macro
 **Goal:** Implement `Handler` for structs.
 
-- [ ] `#[handler]` derives `Handler` for structs with `async fn call(&self, req: Request) -> Response`
-- [ ] Useful for handlers with fields (rate limiter, cache, etc.)
-- [ ] Works alongside `State<S>` pattern
+- [x] `#[handler]` implements `Handler` from an impl block with `async fn call(&self, req: Request)`
+- [x] Useful for handlers with fields (rate limiter, cache, etc.)
+- [x] Works alongside `State<S>` pattern
 
 **Deliverable:** Struct-based handlers work as first-class citizens.
 

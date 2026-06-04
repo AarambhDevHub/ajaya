@@ -71,6 +71,21 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         self
     }
 
+    /// Merge another method router for the same path.
+    ///
+    /// This is primarily used by proc-macro collected routes so separate
+    /// `#[get("/path")]` and `#[post("/path")]` handlers can share one route.
+    pub fn merge(mut self, other: Self) -> Self {
+        if (self.allow_methods.bits() & other.allow_methods.bits()) != 0 {
+            panic!("Method route conflict: duplicate method for route");
+        }
+
+        self.allow_methods |= other.allow_methods;
+        self.handlers.extend(other.handlers);
+        self.layers.extend(other.layers);
+        self
+    }
+
     /// Register a GET handler.
     pub fn get<H, T>(self, handler: H) -> Self
     where

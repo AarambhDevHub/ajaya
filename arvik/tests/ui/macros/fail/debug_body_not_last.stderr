@@ -1,0 +1,5 @@
+error: body-consuming extractors must be the last handler argument
+ --> tests/ui/macros/fail/debug_body_not_last.rs:4:20
+  |
+4 | async fn bad(body: String, Path(_id): Path<String>) -> String {
+  |                    ^^^^^^

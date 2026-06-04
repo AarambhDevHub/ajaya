@@ -95,6 +95,21 @@ pub use arvik_router::PathParams;
 pub use arvik_router::Router;
 pub use arvik_router::{any, delete, get, head, on, options, patch, post, put, trace_method};
 
+#[doc(hidden)]
+pub mod __private {
+    pub use arvik_router::{RouteMeta, assert_no_route_conflicts};
+}
+
+// ---------------------------------------------------------------------------
+// Proc macros (0.7.x)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "macros")]
+pub use arvik_macros::{
+    any, collect_routes, debug_handler, delete, get, handler, head, options, patch, post, put,
+    route, trace,
+};
+
 // ---------------------------------------------------------------------------
 // Extractors (from arvik-extract)
 // ---------------------------------------------------------------------------

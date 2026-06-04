@@ -1,0 +1,11 @@
+error[E0080]: evaluation panicked: duplicate route in collect_routes!
+  --> tests/ui/macros/fail/route_duplicate.rs:14:49
+   |
+14 |     let _app: Router<()> = Router::new().routes(arvik::collect_routes![first, second]);
+   |                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ evaluation of `main::_` failed inside this call
+   |
+note: inside `assert_no_route_conflicts`
+  --> $WORKSPACE/arvik-router/src/router.rs
+   |
+   |                 panic!("duplicate route in collect_routes!");
+   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the failure occurred here
