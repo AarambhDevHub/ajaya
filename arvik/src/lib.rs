@@ -177,6 +177,17 @@ pub use arvik_tls::native::NativeTlsConfig;
 pub use arvik_tls::rustls::RustlsConfig;
 
 // ---------------------------------------------------------------------------
+// Static file support (0.6.x)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "embedded-static")]
+pub use arvik_static::{
+    Embed, EmbeddedFile, EmbeddedFileService, Filenames, Metadata, RustEmbed, utils,
+};
+#[cfg(feature = "static-files")]
+pub use arvik_static::{ServeDir, ServeFile};
+
+// ---------------------------------------------------------------------------
 // Middleware  (0.4.x)
 // ---------------------------------------------------------------------------
 

@@ -990,24 +990,45 @@ Multipart::from_request_with_constraints(req, MultipartConstraints::new()).await
 
 ```rust
 // arvik-static
+use arvik::{Embed, EmbeddedFileService, Router, ServeDir, ServeFile};
+use std::path::PathBuf;
+
+let assets = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets");
+let favicon = assets.join("favicon.ico");
+let not_found = assets.join("404.html");
 
 // Serve a directory
 Router::new()
-    .nest_service("/static", ServeDir::new("assets")
-        .not_found_service(ServeFile::new("assets/404.html"))
+    .nest_service("/static", ServeDir::new(assets)
+        .not_found_service(ServeFile::new(not_found))
         .precompressed_gzip()
         .precompressed_br()
+        .directory_listing(true)
+        .cache_control("public, max-age=60")
         .call_fallback_on_method_not_allowed(true))
 
 // Serve a single file
 Router::new()
-    .route_service("/favicon.ico", ServeFile::new("assets/favicon.ico"))
+    .route_service("/favicon.ico", ServeFile::new(favicon))
 
 // Embed files at compile time (no runtime FS access)
 // via rust-embed integration
+#[derive(Embed)]
+#[folder = "assets"]
+#[crate_path = "arvik"]
+struct Assets;
+
 Router::new()
-    .nest_service("/assets", EmbeddedFileService::<Assets>::new())
+    .nest_service("/assets", EmbeddedFileService::<Assets>::new()
+        .precompressed_gzip()
+        .precompressed_br()
+        .cache_control("public, max-age=31536000, immutable"))
 ```
+
+`ServeDir`, `ServeFile`, and `EmbeddedFileService` implement Tower `Service<Request>`.
+They support MIME detection, `Last-Modified`, `ETag`, conditional `304`, single byte
+ranges, optional directory listings, custom 404 fallback services, and `.br`/`.gz`
+precompressed asset negotiation.
 
 ---
 
@@ -1632,7 +1653,8 @@ metrics    = ["dep:prometheus", "dep:metrics"]
 opentelemetry = ["dep:opentelemetry", "dep:tracing-opentelemetry"]
 
 # Static files
-static-files = ["dep:tokio-util"]
+static-files = ["dep:arvik-static", "arvik-static/fs"]
+embedded-static = ["static-files", "arvik-static/embed"]
 
 # Testing
 test-utils = []

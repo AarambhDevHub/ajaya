@@ -8,6 +8,8 @@ exclude = [
     "examples/tls_hot_reload",
     "examples/native_tls",
     "examples/h2c",
+    "examples/static_files",
+    "examples/embedded_static",
 ]
 members = [
     "arvik",
@@ -25,7 +27,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.3"
+version = "0.6.5"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme       = "README.md"
@@ -93,9 +95,12 @@ tracing        = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 uuid           = { version = "1", features = ["v4"] }
 mime           = "0.3"
+mime_guess     = "2"
 percent-encoding = "2"
+httpdate       = "1"
 itoa           = "1"
 headers        = "0.4"
+rust-embed     = "8"
 
 # Proc macro (arvik-macros only)
 syn            = { version = "2", features = ["full"] }
@@ -115,14 +120,14 @@ base64 = "0.22"
 sha1 = "0.10"
 
 # Internal crates
-arvik-core       = { path = "arvik-core", version = "0.6.3" }
-arvik-router     = { path = "arvik-router", version = "0.6.3" }
-arvik-hyper      = { path = "arvik-hyper", version = "0.6.3" }
-arvik-extract    = { path = "arvik-extract", version = "0.6.3" }
-arvik-middleware = { path = "arvik-middleware", version = "0.6.3" }
-arvik-ws         = { path = "arvik-ws", version = "0.6.3" }
-arvik-sse        = { path = "arvik-sse", version = "0.6.3" }
-arvik-static     = { path = "arvik-static", version = "0.6.3" }
-arvik-tls        = { path = "arvik-tls", version = "0.6.3" }
-arvik-macros     = { path = "arvik-macros", version = "0.6.3" }
-arvik-test       = { path = "arvik-test", version = "0.6.3" }
+arvik-core       = { path = "arvik-core", version = "0.6.5" }
+arvik-router     = { path = "arvik-router", version = "0.6.5" }
+arvik-hyper      = { path = "arvik-hyper", version = "0.6.5" }
+arvik-extract    = { path = "arvik-extract", version = "0.6.5" }
+arvik-middleware = { path = "arvik-middleware", version = "0.6.5" }
+arvik-ws         = { path = "arvik-ws", version = "0.6.5" }
+arvik-sse        = { path = "arvik-sse", version = "0.6.5" }
+arvik-static     = { path = "arvik-static", version = "0.6.5", default-features = false }
+arvik-tls        = { path = "arvik-tls", version = "0.6.5" }
+arvik-macros     = { path = "arvik-macros", version = "0.6.5" }
+arvik-test       = { path = "arvik-test", version = "0.6.5" }

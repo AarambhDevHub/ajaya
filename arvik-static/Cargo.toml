@@ -10,3 +10,24 @@ readme.workspace = true
 description = "Static file serving for the Arvik web framework"
 
 [dependencies]
+arvik-core        = { workspace = true }
+bytes             = { workspace = true }
+futures-util      = { workspace = true }
+http              = { workspace = true }
+http-body-util    = { workspace = true }
+httpdate          = { workspace = true }
+mime              = { workspace = true }
+mime_guess        = { workspace = true }
+percent-encoding = { workspace = true }
+rust-embed        = { workspace = true, optional = true }
+tokio             = { workspace = true, optional = true }
+tokio-util        = { workspace = true, optional = true }
+tower-service     = { workspace = true }
+
+[features]
+default = ["fs"]
+fs = ["dep:tokio", "dep:tokio-util"]
+embed = ["dep:rust-embed"]
+
+[dev-dependencies]
+tempfile = { workspace = true }

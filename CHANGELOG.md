@@ -9,6 +9,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.6.5] — 2026-06-04 — Embedded Static Files
+
+### Added
+
+- `EmbeddedFileService<A: RustEmbed>` for serving compile-time embedded assets.
+- `embedded-static` facade feature that enables `static-files` and `arvik-static/embed`.
+- Re-exports for `Embed`, `RustEmbed`, and `EmbeddedFileService`.
+- Embedded static asset support for MIME detection, SHA-256 ETags, cache headers,
+  conditional `304`, single byte ranges, directory indexes, directory listings, and
+  `.br` / `.gz` precompressed variants.
+- `examples/embedded_static` with the `embedded-static` feature.
+
+---
+
+## [0.6.4] — 2026-06-04 — Static File Serving
+
+### Added
+
+- `arvik-static` runtime filesystem serving with `ServeDir` and `ServeFile`.
+- `static-files` facade feature for opt-in static file support.
+- MIME detection from file extension.
+- `Last-Modified`, weak filesystem `ETag`, `If-Modified-Since`, and `If-None-Match`.
+- Single byte range support with `206 Partial Content` and `416 Range Not Satisfiable`.
+- `ServeDir::not_found_service`, opt-in directory listings, `index.html` directory handling,
+  and precompressed `.br` / `.gz` negotiation.
+- `Router::nest_service` now strips the mount prefix before calling nested services while
+  preserving the original URI for extractors and redirects.
+- `examples/static_files` with the `static-files` feature.
+
+### Changed
+
+- Workspace version bumped to `0.6.5`.
+
+---
+
 ## [0.6.3] — 2026-06-03 — HTTP/2 Tuning
 
 ### Added
