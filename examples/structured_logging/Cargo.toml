@@ -1,0 +1,8 @@
+[package]
+name = "structured_logging"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["logging"] }
+tokio = { version = "1", features = ["full"] }

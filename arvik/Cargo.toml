@@ -35,6 +35,7 @@ futures-util     = { workspace = true }
 tower-layer   = { workspace = true }
 tower-service = { workspace = true }
 uuid = { workspace = true }
+validator = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -52,10 +53,12 @@ config = ["dep:arvik-config"]
 config-hot-reload = ["config", "arvik-config/hot-reload"]
 ws = ["dep:arvik-ws", "arvik-test?/ws"]
 sse = ["dep:arvik-sse"]
+validation = ["arvik-extract/validation", "dep:validator"]
 metrics = ["dep:arvik-observe", "arvik-observe/metrics"]
 opentelemetry = ["dep:arvik-observe", "arvik-observe/opentelemetry"]
 health = ["dep:arvik-observe", "arvik-observe/health"]
-observability = ["metrics", "opentelemetry", "health"]
+logging = ["dep:arvik-observe", "arvik-observe/logging"]
+observability = ["metrics", "opentelemetry", "health", "logging"]
 
 [dev-dependencies]
 trybuild = { workspace = true }

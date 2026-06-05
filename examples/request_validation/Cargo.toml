@@ -1,0 +1,9 @@
+[package]
+name = "request_validation"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["validation"] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }

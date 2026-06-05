@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.8.2-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.4-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -21,7 +21,7 @@
 
 It is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**, designed to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> ⚡ **v0.8.2 — Observability** Arvik now ships Prometheus metrics, OpenTelemetry tracing, health probes, proc macros, in-process test utilities, file/env configuration, and graceful shutdown. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> ⚡ **v0.8.4 — Validation & Logging** Arvik now ships declarative request validation, structured logging, Prometheus metrics, OpenTelemetry tracing, health probes, proc macros, in-process test utilities, file/env configuration, and graceful shutdown. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -40,7 +40,7 @@ Then in another terminal:
 
 ```bash
 curl http://localhost:8080/
-# => {"status":"healthy","framework":"Arvik","version":"0.8.2"}
+# => {"status":"healthy","framework":"Arvik","version":"0.8.4"}
 
 curl http://localhost:8080/users/42
 # => {"id":"42","name":"User from path param"}
@@ -108,6 +108,12 @@ cargo run --manifest-path examples/opentelemetry/Cargo.toml
 
 # Health, liveness, readiness, and startup endpoints, requires health
 cargo run --manifest-path examples/health_checks/Cargo.toml
+
+# Declarative request validation, requires validation
+cargo run --manifest-path examples/request_validation/Cargo.toml
+
+# Structured request logging, requires logging
+cargo run --manifest-path examples/structured_logging/Cargo.toml
 ```
 
 The TLS examples listen on `0.0.0.0:8443`; the plain HTTP examples listen on
@@ -116,7 +122,7 @@ stack, while rustls is the guaranteed HTTP/2 ALPN backend.
 
 ---
 
-## Features (v0.8.2)
+## Features (v0.8.4)
 
 ### ✅ Type-Safe Extractors
 
@@ -607,15 +613,18 @@ serve_with_config_and_graceful_shutdown(
 
 ### ✅ Observability
 
-Metrics, OpenTelemetry, and health checks are opt-in.
+Metrics, OpenTelemetry, health checks, and structured logging are opt-in.
 
 ```toml
-arvik = { version = "0.8", features = ["metrics", "opentelemetry", "health"] }
+arvik = { version = "0.8", features = ["metrics", "opentelemetry", "health", "logging"] }
 ```
 
 ```rust
 use arvik::metrics::{PrometheusMetricsLayer, metrics_handler};
 use arvik::trace::OtelLayer;
+use arvik::logging::{ArvikLogger, StructuredLoggingLayer};
+
+ArvikLogger::init()?;
 
 let app = arvik::Router::new()
     .route("/metrics", arvik::get(metrics_handler))
@@ -623,10 +632,39 @@ let app = arvik::Router::new()
     .route("/health/live", arvik::get(arvik::health::liveness_handler))
     .route("/health/ready", arvik::get(arvik::health::readiness_handler))
     .layer(PrometheusMetricsLayer::new().service_name("api"))
-    .layer(OtelLayer::new("api"));
+    .layer(OtelLayer::new("api"))
+    .layer(StructuredLoggingLayer::new());
 ```
 
-Prometheus labels use matched route patterns such as `/users/{id}`, not raw request paths. OpenTelemetry supports W3C TraceContext, B3, and Jaeger incoming propagation, with stdout and OTLP gRPC/HTTP exporter configuration.
+Prometheus and logging labels use matched route patterns such as `/users/{id}`, not raw request paths. OpenTelemetry supports W3C TraceContext, B3, and Jaeger incoming propagation, with stdout and OTLP gRPC/HTTP exporter configuration.
+
+### ✅ Request Validation
+
+Validation is opt-in with `validation` and uses the `validator` crate.
+
+```toml
+arvik = { version = "0.8", features = ["validation"] }
+```
+
+```rust
+use arvik::{Validate, ValidatedJson};
+use serde::Deserialize;
+
+#[derive(Deserialize, Validate)]
+#[validate(crate = "arvik")]
+struct CreateUser {
+    #[validate(length(min = 2))]
+    name: String,
+    #[validate(email)]
+    email: String,
+}
+
+async fn create_user(ValidatedJson(body): ValidatedJson<CreateUser>) -> String {
+    body.email
+}
+```
+
+`ValidatedJson`, `ValidatedForm`, and `ValidatedQuery` parse first, then return `422 Unprocessable Entity` with sanitized field details when validation fails.
 
 ---
 
@@ -647,7 +685,7 @@ arvik/
 ├── arvik-macros/       # Proc macros: #[debug_handler], #[route], #[handler] (v0.7.x ✅)
 ├── arvik-test/         # TestClient utilities (v0.7.x ✅)
 ├── arvik-config/       # File/env configuration (v0.7.x ✅)
-└── arvik-observe/      # Metrics, OpenTelemetry, and health checks (v0.8.x ✅)
+└── arvik-observe/      # Metrics, OpenTelemetry, logging, and health checks (v0.8.x ✅)
 ```
 
 ---
@@ -681,6 +719,8 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | **0.8.0** | Prometheus Metrics | ✅ Complete |
 | **0.8.1** | OpenTelemetry Tracing | ✅ Complete |
 | **0.8.2** | Health Check Endpoints | ✅ Complete |
+| **0.8.3** | Request Validation | ✅ Complete |
+| **0.8.4** | Structured Logging | ✅ Complete |
 | 0.9.x | Performance Sprint | ⏳ Planned |
 | 0.10.x | Stabilization & Docs | ⏳ Planned |
 

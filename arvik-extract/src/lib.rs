@@ -54,6 +54,8 @@ pub mod rejection;
 pub mod state;
 pub mod typed_header;
 pub mod uri;
+#[cfg(feature = "validation")]
+pub mod validation;
 
 // Re-export extractor types
 pub use self::body::BodyExtractor;
@@ -74,6 +76,13 @@ pub use self::query::Query;
 pub use self::raw_path_params::RawPathParams;
 pub use self::state::{FromRef, State};
 pub use self::typed_header::TypedHeader;
+#[cfg(feature = "validation")]
+pub use self::validation::{
+    ValidatedForm, ValidatedJson, ValidatedQuery, ValidationFieldError, ValidationProblem,
+    ValidationRejection,
+};
+#[cfg(feature = "validation")]
+pub use validator::Validate;
 
 // Re-export rejection types
 pub use self::rejection::*;

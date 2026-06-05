@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.4] — 2026-06-05 — Structured Logging
+
+### Added
+
+- `logging` facade feature and `arvik::logging` module.
+- `ArvikLogger`, `ArvikLoggerBuilder`, and `LogFormat` for process-wide
+  `tracing_subscriber` setup.
+- `StructuredLoggingLayer` for structured request completion logs.
+- Request ID propagation through `x-request-id`.
+- Production JSON / development pretty log auto-detection.
+- Sensitive request header masking when header logging is enabled.
+- `examples/structured_logging`.
+
+### Changed
+
+- Workspace version bumped to `0.8.4`.
+- Corrected the stale roadmap logger name from `AjayaLogger` to `ArvikLogger`.
+
+---
+
+## [0.8.3] — 2026-06-05 — Request Validation
+
+### Added
+
+- `validation` facade feature and opt-in `arvik-extract/validation` feature.
+- `ValidatedJson<T>`, `ValidatedForm<T>`, and `ValidatedQuery<T>` extractors.
+- `ValidationRejection`, `ValidationProblem`, and `ValidationFieldError`.
+- `validator::Validate` re-export for declarative validation derives.
+- Sanitized `422 Unprocessable Entity` validation responses with nested field paths.
+- `examples/request_validation`.
+
+---
+
 ## [0.8.2] — 2026-06-05 — Health Check Endpoints
 
 ### Added
