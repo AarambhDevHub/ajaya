@@ -1,0 +1,1 @@
+/tmp/workspace/AarambhDevHub/arvik/examples/benchmarks/baselines/actix/target/release/arvik_benchmark_actix_baseline: /tmp/workspace/AarambhDevHub/arvik/examples/benchmarks/baselines/actix/src/main.rs
