@@ -1197,7 +1197,7 @@ async fn handler(State(state): State<AppState>, Json(body): Json<Payload>) -> im
 
 ```rust
 // Attach routing metadata directly to functions
-#[arvik::route(GET, "/users/:id")]
+#[arvik::route(GET, "/users/{id}")]
 async fn get_user(Path(id): Path<Uuid>) -> impl IntoResponse {
     // ...
 }
@@ -1212,7 +1212,7 @@ let app = Router::new().routes(arvik::collect_routes![get_user, create_user]);
 ```
 
 `collect_routes!` detects duplicate path/method pairs within the same collection.
-The route macros accept native `{id}` segments and simple `:id` segments.
+The route macros use router-native `{id}` and `{*path}` segments.
 
 ### 19.3 `#[handler]`
 

@@ -97,7 +97,7 @@ pub use arvik_router::{any, delete, get, head, on, options, patch, post, put, tr
 
 #[doc(hidden)]
 pub mod __private {
-    pub use arvik_router::{RouteMeta, assert_no_route_conflicts};
+    pub use arvik_router::{RouteMeta, assert_no_route_conflicts, route_conflict_count};
 }
 
 // ---------------------------------------------------------------------------

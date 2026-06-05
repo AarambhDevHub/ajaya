@@ -13,7 +13,7 @@ async fn create_hello() -> &'static str {
     "created"
 }
 
-#[arvik::get("/users/:id")]
+#[arvik::get("/users/{id}")]
 async fn get_user(Path(id): Path<String>) -> String {
     format!("user:{id}")
 }

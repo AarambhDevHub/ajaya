@@ -237,7 +237,7 @@ async fn main() {
     ║       GET  /state       → read app state       ║
     ║       GET  /users       → list users           ║
     ║       POST /users       → create user (json)   ║
-    ║       GET  /users/:id   → get user by ID       ║
+    ║       GET  /users/{id}   → get user by ID       ║
     ║       POST /upload      → multipart upload     ║
     ║       GET  /stream      → streaming body       ║
     ║       GET  /cached      → cache headers        ║

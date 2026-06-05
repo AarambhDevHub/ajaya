@@ -405,11 +405,11 @@ fn expand_collect_routes(routes: RouteList) -> TokenStream2 {
 
     quote! {
         {
-            const _: () = {
-                #arvik::__private::assert_no_route_conflicts(&[
+            const __ARVIK_NO_DUPLICATE_ROUTES: [(); 1] = [();
+                1 - #arvik::__private::route_conflict_count(&[
                     #(#metas),*
-                ]);
-            };
+                ])
+            ];
 
             |router| {
                 #(let router = #helpers(router);)*
@@ -636,29 +636,13 @@ fn normalize_route_path(path: &str) -> std::result::Result<String, String> {
         return Err("route path must not contain a query string or fragment".to_string());
     }
 
-    let mut normalized = String::with_capacity(path.len());
-    for (idx, segment) in path.split('/').enumerate() {
-        if idx > 0 {
-            normalized.push('/');
-        }
-
-        if let Some(name) = segment.strip_prefix(':') {
-            if name.is_empty()
-                || !name
-                    .chars()
-                    .all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
-            {
-                return Err("route `:param` segments must be valid identifiers".to_string());
-            }
-            normalized.push('{');
-            normalized.push_str(name);
-            normalized.push('}');
-        } else {
-            normalized.push_str(segment);
+    for segment in path.split('/') {
+        if segment.starts_with(':') {
+            return Err("route parameters must use `{name}` syntax, not `:name`".to_string());
         }
     }
 
-    Ok(normalized)
+    Ok(path.to_string())
 }
 
 fn arvik_path() -> TokenStream2 {

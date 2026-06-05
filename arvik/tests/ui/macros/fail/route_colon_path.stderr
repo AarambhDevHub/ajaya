@@ -1,0 +1,5 @@
+error: route parameters must use `{name}` syntax, not `:name`
+ --> tests/ui/macros/fail/route_colon_path.rs:1:14
+  |
+1 | #[arvik::get("/users/:id")]
+  |              ^^^^^^^^^^^^

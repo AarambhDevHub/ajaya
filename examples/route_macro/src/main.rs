@@ -5,7 +5,7 @@ async fn home() -> &'static str {
     "Open http://127.0.0.1:8080/users/42"
 }
 
-#[arvik::get("/users/:id")]
+#[arvik::get("/users/{id}")]
 async fn get_user(Path(id): Path<u64>) -> String {
     format!("User #{id}")
 }

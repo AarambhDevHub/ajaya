@@ -498,7 +498,7 @@ async fn echo(State(_state): State<AppState>, body: String) -> String {
     body
 }
 
-#[arvik::get("/users/:id")]
+#[arvik::get("/users/{id}")]
 async fn get_user(Path(id): Path<u64>) -> String {
     format!("User #{id}")
 }

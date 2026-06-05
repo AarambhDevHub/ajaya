@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `#[arvik::get("/path")]` and `#[arvik::post("/path")]`.
 - `arvik::collect_routes![...]` and `Router::routes(...)` for collected route registration.
 - Compile-time duplicate path/method detection within a collected route set.
-- Route macro support for both `{id}` and simple `:id` path parameter segments.
+- Route macro support for router-native `{id}` and `{*path}` segments.
 - `examples/route_macro` with the `macros` feature.
 
 ---

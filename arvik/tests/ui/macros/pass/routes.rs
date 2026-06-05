@@ -1,6 +1,6 @@
 use arvik::{Path, Router};
 
-#[arvik::get("/users/:id")]
+#[arvik::get("/users/{id}")]
 async fn get_user(Path(id): Path<String>) -> String {
     id
 }

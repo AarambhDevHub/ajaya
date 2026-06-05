@@ -63,6 +63,16 @@ impl RouteMeta {
 ///
 /// This function is `const` so proc macros can run the check during expansion.
 pub const fn assert_no_route_conflicts(routes: &[RouteMeta]) {
+    if route_conflict_count(routes) != 0 {
+        panic!("duplicate route in collect_routes!");
+    }
+}
+
+/// Return `1` when a collected macro route set has a duplicate route.
+///
+/// This intentionally caps at `1` so generated array-size assertions stay
+/// simple and stable across Rust versions.
+pub const fn route_conflict_count(routes: &[RouteMeta]) -> usize {
     let mut i = 0;
     while i < routes.len() {
         let mut j = i + 1;
@@ -70,12 +80,14 @@ pub const fn assert_no_route_conflicts(routes: &[RouteMeta]) {
             if str_eq(routes[i].path, routes[j].path)
                 && (routes[i].method_mask & routes[j].method_mask) != 0
             {
-                panic!("duplicate route in collect_routes!");
+                return 1;
             }
             j += 1;
         }
         i += 1;
     }
+
+    0
 }
 
 const fn str_eq(left: &str, right: &str) -> bool {
