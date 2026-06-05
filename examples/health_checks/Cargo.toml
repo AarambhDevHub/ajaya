@@ -1,0 +1,8 @@
+[package]
+name = "health_checks"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["health"] }
+tokio = { version = "1", features = ["full"] }

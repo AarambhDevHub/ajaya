@@ -205,6 +205,34 @@ pub use arvik_config::{
     ShutdownSection, TlsBackend, TlsSection,
 };
 
+// ---------------------------------------------------------------------------
+// Observability (0.8.x)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "metrics")]
+pub mod metrics {
+    pub use arvik_observe::metrics::*;
+}
+
+#[cfg(feature = "metrics")]
+pub use arvik_observe::metrics::{MetricsRegistry, PrometheusMetricsLayer};
+
+#[cfg(feature = "opentelemetry")]
+pub mod trace {
+    pub use arvik_observe::trace::*;
+}
+
+#[cfg(feature = "opentelemetry")]
+pub use arvik_observe::trace::{OtelConfig, OtelGuard, OtelLayer, Propagation};
+
+#[cfg(feature = "health")]
+pub mod health {
+    pub use arvik_observe::health::*;
+}
+
+#[cfg(feature = "health")]
+pub use arvik_observe::health::{HealthCheckResult, HealthRegistry};
+
 #[cfg(feature = "test-utils")]
 pub use arvik_test::{TestClient, TestRequestBuilder, TestResponse};
 

@@ -718,11 +718,11 @@
 ### `0.8.0` — Prometheus Metrics
 **Goal:** Production metrics out of the box.
 
-- [ ] `PrometheusMetricsLayer` — instruments all requests
-- [ ] Metrics: `arvik_requests_total`, `arvik_request_duration_seconds`, `arvik_requests_in_flight`, `arvik_response_body_size_bytes`, `arvik_request_body_size_bytes`
-- [ ] `GET /metrics` endpoint (Prometheus scrape)
-- [ ] Custom labels: service name, version, environment
-- [ ] Per-route metrics (label by matched path, not raw path — prevents cardinality explosion)
+- [x] `PrometheusMetricsLayer` — instruments all requests
+- [x] Metrics: `arvik_requests_total`, `arvik_request_duration_seconds`, `arvik_requests_in_flight`, `arvik_response_body_size_bytes`, `arvik_request_body_size_bytes`
+- [x] `GET /metrics` endpoint (Prometheus scrape)
+- [x] Custom labels: service name, version, environment
+- [x] Per-route metrics (label by matched path, not raw path — prevents cardinality explosion)
 
 **Deliverable:** Grafana dashboard works from day one.
 
@@ -731,13 +731,13 @@
 ### `0.8.1` — OpenTelemetry Tracing
 **Goal:** Distributed tracing integration.
 
-- [ ] `OtelLayer::new(service_name)` — instruments all requests
-- [ ] W3C TraceContext propagation (`traceparent`, `tracestate`)
-- [ ] B3 propagation (Zipkin-compatible)
-- [ ] Jaeger propagation
-- [ ] OTLP exporter (gRPC + HTTP)
-- [ ] Stdout/JSON exporter (dev mode)
-- [ ] Span attributes: `http.method`, `http.url`, `http.status_code`, `http.user_agent`
+- [x] `OtelLayer::new(service_name)` — instruments all requests
+- [x] W3C TraceContext propagation (`traceparent`, `tracestate`)
+- [x] B3 propagation (Zipkin-compatible)
+- [x] Jaeger propagation
+- [x] OTLP exporter (gRPC + HTTP)
+- [x] Stdout/JSON exporter (dev mode)
+- [x] Span attributes: `http.method`, `http.url`, `http.status_code`, `http.user_agent`
 
 **Deliverable:** Traces flow from gateway → service → service in Jaeger/Tempo.
 
@@ -746,12 +746,12 @@
 ### `0.8.2` — Health Check Endpoints
 **Goal:** Standard health/liveness/readiness endpoints.
 
-- [ ] `GET /health` → `{ status: "ok", uptime: 123 }`
-- [ ] `GET /health/live` → 200 always (process alive)
-- [ ] `GET /health/ready` → 200 only if all checks pass
-- [ ] `arvik::health::add_check(name, async_fn)` — register readiness checks
-- [ ] Checks: DB ping, Redis ping, external API reachability
-- [ ] `GET /health/startup` — one-time startup probe
+- [x] `GET /health` → `{ status: "ok", uptime: 123 }`
+- [x] `GET /health/live` → 200 always (process alive)
+- [x] `GET /health/ready` → 200 only if all checks pass
+- [x] `arvik::health::add_check(name, async_fn)` — register readiness checks
+- [x] Checks: DB ping, Redis ping, external API reachability
+- [x] `GET /health/startup` — one-time startup probe
 
 **Deliverable:** Kubernetes liveness + readiness probes work out of the box.
 

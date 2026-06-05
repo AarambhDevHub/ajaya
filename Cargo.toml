@@ -16,6 +16,9 @@ exclude = [
     "examples/test_client",
     "examples/config_app",
     "examples/graceful_shutdown",
+    "examples/metrics",
+    "examples/opentelemetry",
+    "examples/health_checks",
 ]
 members = [
     "arvik",
@@ -31,10 +34,11 @@ members = [
     "arvik-macros",
     "arvik-test",
     "arvik-config",
+    "arvik-observe",
 ]
 
 [workspace.package]
-version = "0.7.5"
+version = "0.8.2"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 readme       = "README.md"
@@ -101,6 +105,12 @@ parking_lot    = "0.12"
 thiserror      = "2"
 tracing        = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+prometheus     = "0.13"
+opentelemetry  = { version = "0.32", features = ["trace"] }
+opentelemetry_sdk = { version = "0.32", features = ["trace", "rt-tokio"] }
+opentelemetry-otlp = { version = "0.32", features = ["trace", "grpc-tonic", "http-proto", "reqwest-client"] }
+opentelemetry-stdout = { version = "0.32", features = ["trace"] }
+tracing-opentelemetry = "0.33"
 uuid           = { version = "1", features = ["v4"] }
 mime           = "0.3"
 mime_guess     = "2"
@@ -109,6 +119,7 @@ httpdate       = "1"
 itoa           = "1"
 headers        = "0.4"
 rust-embed     = "8"
+once_cell      = "1"
 
 # Proc macro (arvik-macros only)
 syn            = { version = "2", features = ["full"] }
@@ -130,15 +141,16 @@ base64 = "0.22"
 sha1 = "0.10"
 
 # Internal crates
-arvik-core       = { path = "arvik-core", version = "0.7.5" }
-arvik-router     = { path = "arvik-router", version = "0.7.5" }
-arvik-hyper      = { path = "arvik-hyper", version = "0.7.5" }
-arvik-extract    = { path = "arvik-extract", version = "0.7.5" }
-arvik-middleware = { path = "arvik-middleware", version = "0.7.5" }
-arvik-ws         = { path = "arvik-ws", version = "0.7.5" }
-arvik-sse        = { path = "arvik-sse", version = "0.7.5" }
-arvik-static     = { path = "arvik-static", version = "0.7.5", default-features = false }
-arvik-tls        = { path = "arvik-tls", version = "0.7.5" }
-arvik-macros     = { path = "arvik-macros", version = "0.7.5" }
-arvik-test       = { path = "arvik-test", version = "0.7.5" }
-arvik-config     = { path = "arvik-config", version = "0.7.5" }
+arvik-core       = { path = "arvik-core", version = "0.8.2" }
+arvik-router     = { path = "arvik-router", version = "0.8.2" }
+arvik-hyper      = { path = "arvik-hyper", version = "0.8.2" }
+arvik-extract    = { path = "arvik-extract", version = "0.8.2" }
+arvik-middleware = { path = "arvik-middleware", version = "0.8.2" }
+arvik-ws         = { path = "arvik-ws", version = "0.8.2" }
+arvik-sse        = { path = "arvik-sse", version = "0.8.2" }
+arvik-static     = { path = "arvik-static", version = "0.8.2", default-features = false }
+arvik-tls        = { path = "arvik-tls", version = "0.8.2" }
+arvik-macros     = { path = "arvik-macros", version = "0.8.2" }
+arvik-test       = { path = "arvik-test", version = "0.8.2" }
+arvik-config     = { path = "arvik-config", version = "0.8.2" }
+arvik-observe    = { path = "arvik-observe", version = "0.8.2", default-features = false }

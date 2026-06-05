@@ -1,0 +1,48 @@
+[package]
+name = "arvik-observe"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+description = "Observability integrations for the Arvik web framework"
+
+[dependencies]
+arvik-core = { workspace = true }
+arvik-router = { workspace = true }
+bytes = { workspace = true }
+futures-util = { workspace = true, optional = true }
+http = { workspace = true }
+http-body = { workspace = true }
+once_cell = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+opentelemetry-stdout = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+parking_lot = { workspace = true }
+prometheus = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tower-layer = { workspace = true }
+tower-service = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+
+[features]
+default = []
+metrics = ["dep:once_cell", "dep:prometheus"]
+opentelemetry = [
+    "dep:opentelemetry",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry-stdout",
+    "dep:opentelemetry_sdk",
+    "dep:thiserror",
+    "dep:tracing-opentelemetry",
+    "dep:tracing-subscriber",
+]
+health = ["dep:futures-util", "dep:once_cell", "dep:serde", "dep:serde_json", "dep:tokio"]

@@ -1,0 +1,8 @@
+[package]
+name = "metrics"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["metrics"] }
+tokio = { version = "1", features = ["full"] }

@@ -1282,11 +1282,13 @@ Router::new()
     .route("/metrics", get(arvik::metrics::metrics_handler))
 
 // Automatically tracks:
-// - arvik_requests_total (counter, by method + path + status)
+// - arvik_requests_total (counter, by method + matched route + status)
 // - arvik_request_duration_seconds (histogram)
 // - arvik_requests_in_flight (gauge)
 // - arvik_response_body_size_bytes (histogram)
 // - arvik_request_body_size_bytes (histogram)
+//
+// Matched route labels use router patterns such as `/users/{id}`, not raw paths.
 ```
 
 ### 21.2 Distributed Tracing
@@ -1299,7 +1301,7 @@ Router::new()
     .layer(OtelLayer::new("my-service"))
 
 // Propagates: W3C TraceContext, B3, Jaeger headers
-// Exports to: OTLP (gRPC/HTTP), Jaeger, Zipkin, stdout
+// Exports to: OTLP (gRPC/HTTP, including Jaeger/Tempo collectors), stdout
 ```
 
 ### 21.3 Health Checks
@@ -1310,6 +1312,7 @@ Router::new()
     .route("/health", get(arvik::health::health_handler))
     .route("/health/live", get(arvik::health::liveness_handler))
     .route("/health/ready", get(arvik::health::readiness_handler))
+    .route("/health/startup", get(arvik::health::startup_handler))
 
 // Custom readiness checks
 arvik::health::add_check("database", || async {
