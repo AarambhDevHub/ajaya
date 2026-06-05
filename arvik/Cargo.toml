@@ -18,6 +18,8 @@ arvik-middleware = { workspace = true }
 arvik-tls     = { workspace = true, optional = true }
 arvik-static  = { workspace = true, optional = true, default-features = false }
 arvik-macros  = { workspace = true, optional = true }
+arvik-test    = { workspace = true, optional = true }
+arvik-config  = { workspace = true, optional = true }
 arvik-ws      = { workspace = true, optional = true }
 arvik-sse        = { workspace = true, optional = true }
 tokio         = { workspace = true }
@@ -44,7 +46,10 @@ native-tls-vendored = ["native-tls", "arvik-hyper/native-tls-vendored", "arvik-t
 static-files = ["dep:arvik-static", "arvik-static/fs"]
 embedded-static = ["static-files", "arvik-static/embed"]
 macros = ["dep:arvik-macros"]
-ws = ["dep:arvik-ws"]
+test-utils = ["dep:arvik-test"]
+config = ["dep:arvik-config"]
+config-hot-reload = ["config", "arvik-config/hot-reload"]
+ws = ["dep:arvik-ws", "arvik-test?/ws"]
 sse = ["dep:arvik-sse"]
 
 [dev-dependencies]

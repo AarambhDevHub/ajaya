@@ -159,6 +159,11 @@ arvik/
 │       ├── lib.rs
 │       └── client.rs
 │
+├── arvik-config/               # File/env configuration
+│   ├── Cargo.toml
+│   └── src/
+│       └── lib.rs
+│
 └── examples/
     ├── hello_world/
     ├── rest_api/
@@ -189,6 +194,7 @@ arvik/
 | `arvik-tls` | TLS acceptor (rustls / native-tls) | `TlsAcceptor` |
 | `arvik-macros` | Proc macros for ergonomics | `#[handler]`, `#[route]` |
 | `arvik-test` | In-process test client | `TestClient` |
+| `arvik-config` | TOML/JSON/env configuration | `ArvikConfig` |
 
 ---
 
@@ -1100,8 +1106,8 @@ ServerConfig::new()
 ```
 
 `ServerConfig` is only for low-level runtime/server tuning. File/env config
-loading, including `arvik.toml`, belongs to the future 0.7.4 configuration
-system.
+loading, including `arvik.toml`, is handled by `ArvikConfig` in the opt-in
+`config` feature.
 
 HTTP/2 push promises are not implemented in Arvik Hyper mode because browser
 support is deprecated and Hyper's service API does not expose a stable push
@@ -1138,14 +1144,14 @@ arvik::serve(app, addr).await?;
 ```rust
 // arvik-test
 
-// Build in-process test client (no network, no port)
+// Build in-process HTTP test client (no network, no port)
 let app = Router::new().route("/", get(|| async { "Hello" }));
 let client = TestClient::new(app);
 
 // GET request
 let res = client.get("/").send().await;
 assert_eq!(res.status(), 200);
-assert_eq!(res.text().await, "Hello");
+assert_eq!(res.text().await?, "Hello");
 
 // POST JSON
 let res = client.post("/users")
@@ -1153,7 +1159,7 @@ let res = client.post("/users")
     .send()
     .await;
 assert_eq!(res.status(), 201);
-let body: User = res.json().await;
+let body: User = res.json().await?;
 
 // Headers
 let res = client.get("/protected")
@@ -1161,19 +1167,10 @@ let res = client.get("/protected")
     .send()
     .await;
 
-// WebSocket test
-let mut ws = client.ws("/ws").await;
-ws.send(Message::Text("hello".into())).await;
+// WebSocket test uses a short-lived loopback listener behind the ws feature.
+let mut ws = client.ws("/ws").await?;
+ws.send(Message::Text("hello".into())).await?;
 let reply = ws.recv().await.unwrap();
-
-// Multipart
-let res = client.post("/upload")
-    .multipart(
-        Form::new()
-            .part("file", Part::bytes(file_bytes).file_name("test.txt"))
-    )
-    .send()
-    .await;
 ```
 
 ---
@@ -1243,27 +1240,17 @@ attribute on the struct cannot inspect a later `impl` block.
 
 ```rust
 // arvik::config
-// Future 0.7.4 file/env application config.
-// This is separate from arvik_hyper::ServerConfig, which is only
-// low-level connection/protocol tuning.
-
-#[derive(Debug, Deserialize)]
-pub struct AppConfig {
-    pub host: String,
-    pub port: u16,
-    pub workers: Option<usize>,           // defaults to num CPUs
-    pub backlog: u32,                     // TCP backlog (default: 1024)
-    pub max_connections: Option<usize>,
-    pub body_limit: usize,                // bytes (default: 10MB)
-    pub tls: Option<TlsConfig>,
-    pub shutdown_timeout: Duration,
-}
+// File/env application config is separate from arvik_hyper::ServerConfig,
+// which remains low-level connection/protocol tuning.
 
 // Load from file, env, or code
-let config = AjayaConfig::builder()
+let config = ArvikConfig::builder()
     .file("arvik.toml")
-    .env_prefix("AJAYA")
+    .env_prefix("ARVIK")
     .build()?;
+
+let server_config = config.server_config();
+let shutdown_config = config.shutdown_config();
 
 // arvik.toml example
 // [server]
@@ -1271,6 +1258,12 @@ let config = AjayaConfig::builder()
 // port = 8080
 // workers = 4
 // body_limit = 10485760
+//
+// [http2]
+// max_concurrent_streams = 1000
+//
+// [shutdown]
+// drain_timeout_secs = 30
 ```
 
 ---
@@ -1625,61 +1618,34 @@ proc-macro2    = "1"
 ```toml
 # arvik/Cargo.toml
 [features]
-default = ["http1", "http2", "json", "form", "query", "multipart", "ws", "sse"]
+default = []
 
 # HTTP versions
-http1      = []
-http2      = ["hyper/http2"]
-http3      = ["dep:quinn", "dep:h3", "dep:h3-quinn"]
-
-# Data formats
-json       = ["dep:serde_json"]
-msgpack    = ["dep:rmp-serde"]
-cbor       = ["dep:ciborium"]
-xml        = ["dep:quick-xml"]
-yaml       = ["dep:serde_yaml"]
-
-# Body parsers
-form       = ["dep:serde_urlencoded"]
-query      = ["dep:serde_urlencoded"]
-multipart  = ["dep:multer"]
+http1      = ["arvik-hyper/http1"]
+http2      = ["arvik-hyper/http2"]
 
 # Protocols
-ws         = ["dep:tokio-tungstenite"]
-sse        = []
-grpc       = ["dep:tonic"]
+ws         = ["dep:arvik-ws", "arvik-test?/ws"]
+sse        = ["dep:arvik-sse"]
 
 # TLS
-tls        = ["rustls", "tokio-rustls"]
-native-tls = ["dep:native-tls", "dep:tokio-native-tls"]
-
-# Compression
-compression   = ["dep:async-compression", "dep:tower-http/compression-full"]
-decompression = ["dep:async-compression", "dep:tower-http/decompression-full"]
-
-# Security
-cookies    = ["dep:cookie"]
-csrf       = ["cookies"]
-
-# Observability
-metrics    = ["dep:prometheus", "dep:metrics"]
-opentelemetry = ["dep:opentelemetry", "dep:tracing-opentelemetry"]
+tls        = ["dep:arvik-tls", "arvik-hyper/tls", "arvik-tls/rustls"]
+tls-hot-reload = ["tls", "arvik-hyper/tls-hot-reload", "arvik-tls/tls-hot-reload"]
+native-tls = ["dep:arvik-tls", "arvik-hyper/native-tls", "arvik-tls/native-tls"]
+native-tls-vendored = ["native-tls", "arvik-hyper/native-tls-vendored", "arvik-tls/native-tls-vendored"]
 
 # Static files
 static-files = ["dep:arvik-static", "arvik-static/fs"]
 embedded-static = ["static-files", "arvik-static/embed"]
 
-# Testing
-test-utils = []
-
 # Proc macros
 macros     = ["dep:arvik-macros"]
 
-# Validation
-validator  = ["dep:validator"]
+# Testing and config
+test-utils = ["dep:arvik-test"]
+config = ["dep:arvik-config"]
+config-hot-reload = ["config", "arvik-config/hot-reload"]
 
-# Database pools (convenience re-exports)
-sqlx       = ["dep:sqlx"]
 ```
 
 ---

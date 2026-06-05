@@ -676,25 +676,25 @@
 ### `0.7.3` — Test Client
 **Goal:** In-process testing without spinning up a real server.
 
-- [ ] `arvik-test`: `TestClient::new(app)` — wraps router in memory
-- [ ] `client.get(path)`, `.post(path)`, `.put(path)`, `.delete(path)`, `.patch(path)`
-- [ ] Request builder: `.header()`, `.json()`, `.form()`, `.body()`, `.query()`
-- [ ] Response: `.status()`, `.headers()`, `.text().await`, `.json::<T>().await`, `.bytes().await`
-- [ ] WebSocket test: `client.ws(path).await → TestWebSocket`
-- [ ] Cookie jar: automatically maintains cookies across requests
+- [x] `arvik-test`: `TestClient::new(app)` — wraps router in memory
+- [x] `client.get(path)`, `.post(path)`, `.put(path)`, `.delete(path)`, `.patch(path)`
+- [x] Request builder: `.header()`, `.json()`, `.form()`, `.body()`, `.query()`
+- [x] Response: `.status()`, `.headers()`, `.text().await`, `.json::<T>().await`, `.bytes().await`
+- [x] WebSocket test: `client.ws(path).await → TestWebSocket` using loopback behind `ws`
+- [x] Cookie jar: automatically maintains cookies across requests
 
-**Deliverable:** Handler tests run in microseconds, no port needed.
+**Deliverable:** HTTP handler tests run in microseconds with no port needed.
 
 ---
 
 ### `0.7.4` — Configuration System
 **Goal:** Centralized file/env application configuration.
 
-- [ ] Map file/env settings onto the existing low-level `ServerConfig`
-- [ ] `AjayaConfig::builder()` with `.file()`, `.env_prefix()`, `.defaults()`, `.build()`
-- [ ] Support: TOML, JSON, env vars
-- [ ] Hot-reload config (debounced file watcher)
-- [ ] Config schema validation with human-readable errors
+- [x] Map file/env settings onto the existing low-level `ServerConfig`
+- [x] `ArvikConfig::builder()` with `.file()`, `.env_prefix()`, `.defaults()`, `.build()`
+- [x] Support: TOML, JSON, env vars
+- [x] Hot-reload config (debounced file watcher)
+- [x] Config schema validation with human-readable errors
 
 **Deliverable:** `arvik.toml` controls all server behavior, env vars override for production.
 
@@ -703,11 +703,11 @@
 ### `0.7.5` — Graceful Shutdown
 **Goal:** Zero-downtime deploys and clean process exit.
 
-- [ ] `serve_with_graceful_shutdown(app, signal_future)` — stop accepting new connections
-- [ ] In-flight requests complete (with timeout)
-- [ ] Configurable drain timeout
-- [ ] Signal handling: `SIGTERM`, `SIGINT` (Unix), `CTRL_C` (Windows)
-- [ ] Connection state: `on_connected`, `on_disconnected` hooks
+- [x] `serve_with_graceful_shutdown(app, signal_future)` — stop accepting new connections
+- [x] In-flight requests complete (with timeout)
+- [x] Configurable drain timeout
+- [x] Signal handling: `SIGTERM`, `SIGINT` (Unix), `CTRL_C` (Windows)
+- [x] Connection state: `on_connected`, `on_disconnected` hooks
 
 **Deliverable:** `kill -TERM` → server drains and exits cleanly.
 

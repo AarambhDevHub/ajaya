@@ -165,13 +165,51 @@ pub use arvik_extract::rejection;
 // ---------------------------------------------------------------------------
 pub use arvik_hyper::Server;
 pub use arvik_hyper::ServerConfig;
-pub use arvik_hyper::{serve, serve_app, serve_router, serve_with_config};
+pub use arvik_hyper::{ConnectionInfo, ShutdownConfig, default_shutdown_signal};
+pub use arvik_hyper::{
+    serve, serve_app, serve_handler_with_config, serve_handler_with_config_and_graceful_shutdown,
+    serve_handler_with_graceful_shutdown, serve_router, serve_router_with_config,
+    serve_router_with_config_and_graceful_shutdown, serve_router_with_graceful_shutdown,
+    serve_service, serve_service_with_config, serve_service_with_config_and_graceful_shutdown,
+    serve_service_with_graceful_shutdown, serve_with_config,
+    serve_with_config_and_graceful_shutdown, serve_with_graceful_shutdown,
+};
 #[cfg(feature = "http2")]
-pub use arvik_hyper::{serve_h2c, serve_h2c_with_config};
+pub use arvik_hyper::{
+    serve_h2c, serve_h2c_with_config, serve_h2c_with_config_and_graceful_shutdown,
+    serve_h2c_with_graceful_shutdown,
+};
 #[cfg(feature = "native-tls")]
-pub use arvik_hyper::{serve_native_tls, serve_native_tls_with_config};
+pub use arvik_hyper::{
+    serve_native_tls, serve_native_tls_with_config,
+    serve_native_tls_with_config_and_graceful_shutdown, serve_native_tls_with_graceful_shutdown,
+};
 #[cfg(feature = "tls")]
-pub use arvik_hyper::{serve_tls, serve_tls_with_config};
+pub use arvik_hyper::{
+    serve_tls, serve_tls_with_config, serve_tls_with_config_and_graceful_shutdown,
+    serve_tls_with_graceful_shutdown,
+};
+
+// ---------------------------------------------------------------------------
+// Configuration and test utilities (0.7.x)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "config")]
+pub mod config {
+    pub use arvik_config::*;
+}
+
+#[cfg(feature = "config")]
+pub use arvik_config::{
+    ArvikConfig, ArvikConfigBuilder, ConfigError, Http1Section, Http2Section, ServerSection,
+    ShutdownSection, TlsBackend, TlsSection,
+};
+
+#[cfg(feature = "test-utils")]
+pub use arvik_test::{TestClient, TestRequestBuilder, TestResponse};
+
+#[cfg(all(feature = "test-utils", feature = "ws"))]
+pub use arvik_test::{TestWebSocket, TestWebSocketError};
 
 // ---------------------------------------------------------------------------
 // TLS support (0.6.x)

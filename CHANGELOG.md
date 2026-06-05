@@ -9,6 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.5] — 2026-06-05 — Graceful Shutdown
+
+### Added
+
+- `ShutdownConfig`, `ConnectionInfo`, and `default_shutdown_signal`.
+- Graceful shutdown serving APIs for routers, services, handlers, h2c, rustls, and native-tls.
+- Connection drain timeout handling with abort of remaining connection tasks after timeout.
+- `on_connected` and `on_disconnected` connection lifecycle hooks.
+- Low-level `ServerConfig::max_connections` connection admission tuning.
+- `examples/graceful_shutdown`.
+
+### Changed
+
+- Workspace version bumped to `0.7.5`.
+
+---
+
+## [0.7.4] — 2026-06-05 — Configuration System
+
+### Added
+
+- New `arvik-config` crate and opt-in `arvik/config` facade feature.
+- `ArvikConfig::builder()` with `.file()`, `.env_prefix()`, `.defaults()`, and `.build()`.
+- TOML, JSON, and `ARVIK_*` environment overrides.
+- `config-hot-reload` feature with debounced file watching that preserves the last valid config after failed reloads.
+- Helpers for `bind_addr`, `server_config`, and `shutdown_config`.
+- `examples/config_app`.
+
+---
+
+## [0.7.3] — 2026-06-05 — Test Client
+
+### Added
+
+- Implemented `arvik-test` with `TestClient`, `TestRequestBuilder`, and `TestResponse`.
+- In-process HTTP request testing for routers and Arvik services.
+- Request builder helpers for headers, query params, JSON, form bodies, raw bodies, and cookies.
+- Response helpers for status, headers, bytes, text, and JSON decoding.
+- Persistent cookie jar across requests.
+- Feature-gated loopback WebSocket test helper through `client.ws()`.
+- `examples/test_client`.
+
+---
+
 ## [0.7.2] — 2026-06-04 — `#[handler]` Macro
 
 ### Added
@@ -100,7 +144,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Real HTTP/2 push promises are documented as unsupported/deprecated in Arvik Hyper mode;
   use `Preload` / `PreloadLink` instead.
-- File/env configuration remains deferred to the future `0.7.4` configuration system.
+- File/env configuration remains outside `ServerConfig`; it is handled by the `0.7.4`
+  `ArvikConfig` system.
 
 ---
 

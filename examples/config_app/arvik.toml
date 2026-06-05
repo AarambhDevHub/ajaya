@@ -1,0 +1,14 @@
+[server]
+host = "127.0.0.1"
+port = 8080
+body_limit = 1048576
+max_connections = 1024
+
+[http1]
+keep_alive = true
+
+[http2]
+max_concurrent_streams = 256
+
+[shutdown]
+drain_timeout_secs = 10
