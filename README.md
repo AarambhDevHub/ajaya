@@ -776,11 +776,16 @@ Arvik aims to unify extreme ergonomics with world-class performance. The 0.9.x
 benchmark suite lives in `examples/benchmarks` and can be run locally with
 `scripts/bench/run-all.sh`. Local numbers depend on CPU, kernel, governor,
 open-file limits, and background load; the manual GitHub benchmark workflow is
-a smoke/artifact workflow, not a release-grade performance claim.
+a manual artifact workflow, not a release-grade performance claim. Use the
+workflow's `manual` profile for publishable artifacts; the `smoke` profile is a
+5s validation run only.
 
-The HTTP/1.1 benchmark endpoints use `wrk` and `hey`. The h2c endpoint is
-HTTP/2 prior-knowledge only and uses `h2load` from `nghttp2-client`; it is
-skipped locally if `h2load` is not installed.
+The HTTP/1.1 benchmark endpoints start normal `serve` servers and use `wrk`
+plus `hey`. The h2c benchmark starts a separate `serve_h2c` server and only
+then runs `h2load` from `nghttp2-client`. Raw outputs are written separately:
+`wrk_plaintext.txt`, `hey_plaintext.txt`, `h2load_h2c_plaintext.txt`,
+`summary.json`, and `summary.md`. If h2c is disabled with `BENCH_H2C=0`,
+`h2load` is marked skipped instead of failed.
 
 Historical simple TCP path routing numbers (`wrk -t4 -c100 -d10s`, release
 mode, same hardware):
