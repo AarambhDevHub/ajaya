@@ -10,3 +10,20 @@ readme.workspace = true
 description = "Testing utilities for the Arvik web framework"
 
 [dependencies]
+arvik-core = { workspace = true }
+arvik-router = { workspace = true }
+arvik-hyper = { workspace = true, optional = true }
+arvik-ws = { workspace = true, optional = true }
+bytes = { workspace = true }
+cookie = { workspace = true }
+futures-util = { workspace = true }
+http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_urlencoded = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true, optional = true }
+
+[features]
+default = []
+ws = ["dep:arvik-hyper", "dep:arvik-ws", "dep:tokio-tungstenite"]

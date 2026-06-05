@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.7.2-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.5-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -21,7 +21,7 @@
 
 It is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**, designed to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> ⚡ **v0.7.2 — Proc Macros** Arvik now ships rustls HTTPS, HTTP/2 tuning, static assets, and opt-in `#[debug_handler]`, `#[route]`, and `#[handler]` macros. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> ⚡ **v0.7.5 — Test, Config, Shutdown** Arvik now ships proc macros, in-process test utilities, file/env configuration, and graceful shutdown. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -40,7 +40,7 @@ Then in another terminal:
 
 ```bash
 curl http://localhost:8080/
-# => {"status":"healthy","framework":"Arvik","version":"0.7.2"}
+# => {"status":"healthy","framework":"Arvik","version":"0.7.5"}
 
 curl http://localhost:8080/users/42
 # => {"id":"42","name":"User from path param"}
@@ -90,6 +90,15 @@ cargo run --manifest-path examples/route_macro/Cargo.toml
 
 # Struct handlers, requires macros
 cargo run --manifest-path examples/handler_macro/Cargo.toml
+
+# In-process HTTP test client, requires test-utils
+cargo run --manifest-path examples/test_client/Cargo.toml
+
+# File/env configuration, requires config
+cargo run --manifest-path examples/config_app/Cargo.toml
+
+# Graceful shutdown with connection hooks
+cargo run --manifest-path examples/graceful_shutdown/Cargo.toml
 ```
 
 The TLS examples listen on `0.0.0.0:8443`; the plain HTTP examples listen on
@@ -98,7 +107,7 @@ stack, while rustls is the guaranteed HTTP/2 ALPN backend.
 
 ---
 
-## Features (v0.7.2)
+## Features (v0.7.5)
 
 ### ✅ Type-Safe Extractors
 
@@ -423,7 +432,7 @@ let config = ServerConfig::new()
 serve_h2c_with_config(app, "0.0.0.0:8080", config).await?;
 ```
 
-`ServerConfig` is intentionally limited to connection and protocol tuning. File/env config loading, including future `arvik.toml`, belongs to the later `0.7.4` configuration roadmap.
+`ServerConfig` is intentionally limited to connection and protocol tuning. File/env config loading lives in the opt-in `config` feature through `ArvikConfig`.
 
 HTTP/2 server push promises are not implemented in Arvik Hyper mode because the browser feature is deprecated and Hyper does not expose a stable push API. Use `Preload` / `PreloadLink` to emit `Link: rel=preload` headers instead.
 
@@ -520,6 +529,73 @@ let app: Router<AppState> = Router::new()
 
 `collect_routes!` detects duplicate path/method pairs within one collection at compile time. Use an impl-block `#[handler]`; a struct attribute cannot inspect a later inherent `impl`.
 
+### ✅ Test Client
+
+Test utilities are opt-in with `test-utils`.
+
+```toml
+arvik = { version = "0.7", features = ["test-utils"] }
+```
+
+```rust
+use arvik::{Router, TestClient, get};
+
+let app = Router::new().route("/", get(|| async { "Hello" }));
+let client = TestClient::new(app);
+
+let res = client.get("/").header("x-test", "ok").send().await;
+assert_eq!(res.status(), 200);
+assert_eq!(res.text().await?, "Hello");
+```
+
+HTTP requests run fully in-process with no port. `client.ws()` is available with `features = ["test-utils", "ws"]` and uses a short-lived loopback listener because Arvik WebSockets rely on Hyper upgrade IO.
+
+### ✅ Configuration
+
+File/env configuration is opt-in with `config`.
+
+```toml
+arvik = { version = "0.7", features = ["config"] }
+```
+
+```rust
+use arvik::ArvikConfig;
+
+let config = ArvikConfig::builder()
+    .file("arvik.toml")
+    .env_prefix("ARVIK")
+    .build()?;
+
+let server_config = config.server_config();
+let shutdown_config = config.shutdown_config();
+```
+
+Supported files are TOML and JSON. Env vars such as `ARVIK_SERVER_PORT` and `ARVIK_HTTP2_MAX_CONCURRENT_STREAMS` override files. Hot reload is available through `config-hot-reload`; failed reloads keep the last valid config active.
+
+### ✅ Graceful Shutdown
+
+```rust
+use arvik::{
+    Router, ShutdownConfig, default_shutdown_signal, get,
+    serve_with_config_and_graceful_shutdown,
+};
+use std::time::Duration;
+
+let app = Router::new().route("/", get(|| async { "Hello" }));
+let shutdown = ShutdownConfig::default()
+    .drain_timeout(Duration::from_secs(10))
+    .on_connected(|info| println!("connected: {}", info.peer_addr))
+    .on_disconnected(|info| println!("disconnected: {}", info.peer_addr));
+
+serve_with_config_and_graceful_shutdown(
+    app,
+    "0.0.0.0:8080",
+    arvik::ServerConfig::default(),
+    shutdown,
+    default_shutdown_signal(),
+).await?;
+```
+
 ---
 
 ## Workspace Structure
@@ -537,7 +613,8 @@ arvik/
 ├── arvik-static/       # Static file serving + embedded assets (v0.6.x ✅)
 ├── arvik-tls/          # TLS via rustls + native-tls (v0.6.x ✅)
 ├── arvik-macros/       # Proc macros: #[debug_handler], #[route], #[handler] (v0.7.x ✅)
-└── arvik-test/         # Testing utilities (coming in v0.7.x)
+├── arvik-test/         # TestClient utilities (v0.7.x ✅)
+└── arvik-config/       # File/env configuration (v0.7.x ✅)
 ```
 
 ---
@@ -565,7 +642,9 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | **0.7.0** | `#[debug_handler]` Macro | ✅ Complete |
 | **0.7.1** | `#[route]` Macro | ✅ Complete |
 | **0.7.2** | `#[handler]` Macro | ✅ Complete |
-| 0.7.3+ | Test Client, Config | ⏳ Planned |
+| **0.7.3** | Test Client | ✅ Complete |
+| **0.7.4** | Configuration System | ✅ Complete |
+| **0.7.5** | Graceful Shutdown | ✅ Complete |
 | 0.8.x | Observability & Security | ⏳ Planned |
 | 0.9.x | Performance Sprint | ⏳ Planned |
 | 0.10.x | Stabilization & Docs | ⏳ Planned |

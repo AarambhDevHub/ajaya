@@ -1,0 +1,8 @@
+[package]
+name = "graceful_shutdown"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+arvik = { path = "../../arvik" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }

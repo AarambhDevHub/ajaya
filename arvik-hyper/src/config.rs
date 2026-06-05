@@ -11,6 +11,7 @@ use hyper_util::server::conn::auto::Builder;
 /// Low-level HTTP server tuning.
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
+    max_connections: Option<usize>,
     http1_keep_alive: bool,
     http1_half_close: bool,
     http1_title_case_headers: bool,
@@ -31,6 +32,7 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
+            max_connections: None,
             http1_keep_alive: true,
             http1_half_close: false,
             http1_title_case_headers: false,
@@ -54,6 +56,42 @@ impl ServerConfig {
     /// Create a default server config.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Set the maximum number of concurrently accepted connections.
+    ///
+    /// Connections accepted while this limit is reached are closed immediately.
+    #[must_use]
+    pub fn max_connections(mut self, max: usize) -> Self {
+        self.max_connections = Some(max);
+        self
+    }
+
+    /// Disable the connection admission limit.
+    #[must_use]
+    pub fn unlimited_connections(mut self) -> Self {
+        self.max_connections = None;
+        self
+    }
+
+    /// Return the configured concurrent connection limit.
+    pub fn max_connections_limit(&self) -> Option<usize> {
+        self.max_connections
+    }
+
+    /// Return whether HTTP/1 keep-alive is enabled.
+    pub fn http1_keep_alive_enabled(&self) -> bool {
+        self.http1_keep_alive
+    }
+
+    /// Return whether HTTP/2-only mode is enabled.
+    pub fn http2_only_enabled(&self) -> bool {
+        self.http2_only
+    }
+
+    /// Return the HTTP/2 max concurrent streams setting.
+    pub fn http2_max_concurrent_streams_limit(&self) -> Option<u32> {
+        self.http2_max_concurrent_streams
     }
 
     /// Enable or disable HTTP/1 keep-alive.
@@ -231,11 +269,13 @@ mod tests {
     #[test]
     fn builder_methods_store_http2_only() {
         let config = ServerConfig::new()
+            .max_connections(64)
             .http2_only(true)
             .http2_max_concurrent_streams(500)
             .http2_keep_alive_interval(Duration::from_secs(5));
 
         assert!(config.is_http2_only());
+        assert_eq!(config.max_connections_limit(), Some(64));
         assert_eq!(config.http2_max_concurrent_streams, Some(500));
         assert_eq!(
             config.http2_keep_alive_interval,
