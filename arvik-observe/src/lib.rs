@@ -5,6 +5,8 @@
 
 #[cfg(feature = "health")]
 pub mod health;
+#[cfg(feature = "logging")]
+pub mod logging;
 #[cfg(feature = "metrics")]
 pub mod metrics;
 #[cfg(feature = "opentelemetry")]

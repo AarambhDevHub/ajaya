@@ -11,6 +11,7 @@ description = "Observability integrations for the Arvik web framework"
 
 [dependencies]
 arvik-core = { workspace = true }
+arvik-middleware = { workspace = true, optional = true }
 arvik-router = { workspace = true }
 bytes = { workspace = true }
 futures-util = { workspace = true, optional = true }
@@ -32,6 +33,7 @@ tower-service = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 
 [features]
 default = []
@@ -46,3 +48,7 @@ opentelemetry = [
     "dep:tracing-subscriber",
 ]
 health = ["dep:futures-util", "dep:once_cell", "dep:serde", "dep:serde_json", "dep:tokio"]
+logging = ["dep:arvik-middleware", "dep:tracing-subscriber", "dep:uuid"]
+
+[dev-dependencies]
+tokio = { workspace = true }

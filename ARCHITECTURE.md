@@ -1320,6 +1320,24 @@ arvik::health::add_check("database", || async {
 });
 ```
 
+### 21.4 Structured Logging
+
+```rust
+// Structured request logging (feature = "logging")
+use arvik::logging::{ArvikLogger, StructuredLoggingLayer};
+
+ArvikLogger::init()?;
+
+Router::new()
+    .route("/", get(handler))
+    .layer(StructuredLoggingLayer::new())
+
+// Auto format:
+// - JSON when ARVIK_ENV/APP_ENV/RUST_ENV/ENV is production or prod
+// - pretty logs otherwise
+// Request IDs are propagated through x-request-id.
+```
+
 ---
 
 ## 22. Security Features
@@ -1353,7 +1371,11 @@ async fn handler(jar: PrivateCookieJar) -> impl IntoResponse {
 
 ```rust
 // Via validator crate integration
+use arvik::{Validate, ValidatedJson};
+use serde::Deserialize;
+
 #[derive(Deserialize, Validate)]
+#[validate(crate = "arvik")]
 struct CreateUser {
     #[validate(length(min = 2, max = 50))]
     name: String,

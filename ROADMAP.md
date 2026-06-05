@@ -760,12 +760,12 @@
 ### `0.8.3` — Request Validation
 **Goal:** Declarative input validation.
 
-- [ ] `ValidatedJson<T: Validate>` extractor — parse + validate JSON
-- [ ] `ValidatedForm<T: Validate>` extractor — parse + validate form
-- [ ] `ValidatedQuery<T: Validate>` extractor — parse + validate query
-- [ ] `ValidationRejection` → `422 Unprocessable Entity` with field error details
-- [ ] Uses `validator` crate: `#[validate(email)]`, `#[validate(length(min=2))]`, etc.
-- [ ] Nested validation
+- [x] `ValidatedJson<T: Validate>` extractor — parse + validate JSON
+- [x] `ValidatedForm<T: Validate>` extractor — parse + validate form
+- [x] `ValidatedQuery<T: Validate>` extractor — parse + validate query
+- [x] `ValidationRejection` → `422 Unprocessable Entity` with field error details
+- [x] Uses `validator` crate: `#[validate(email)]`, `#[validate(length(min=2))]`, etc.
+- [x] Nested validation
 
 **Deliverable:** Input never reaches handler logic if it fails validation.
 
@@ -774,11 +774,11 @@
 ### `0.8.4` — Structured Logging
 **Goal:** Production-ready logging setup.
 
-- [ ] `AjayaLogger::init()` — sets up `tracing_subscriber` with sensible defaults
-- [ ] JSON log format (production), pretty format (dev), detect via env
-- [ ] Log level from `RUST_LOG` env var
-- [ ] Request ID propagated through all log lines in a request
-- [ ] Sensitive header masking in logs
+- [x] `ArvikLogger::init()` — sets up `tracing_subscriber` with sensible defaults
+- [x] JSON log format (production), pretty format (dev), detect via env
+- [x] Log level from `RUST_LOG` env var
+- [x] Request ID propagated through all log lines in a request
+- [x] Sensitive header masking in logs
 
 **Deliverable:** `docker logs myapp | jq` works perfectly in production.
 

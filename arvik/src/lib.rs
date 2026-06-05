@@ -132,6 +132,13 @@ pub use arvik_extract::OriginalUri;
 // Body extractors — Json from extract (has both FromRequest + IntoResponse)
 pub use arvik_extract::Form;
 pub use arvik_extract::Json;
+#[cfg(feature = "validation")]
+pub use arvik_extract::{
+    ValidatedForm, ValidatedJson, ValidatedQuery, ValidationFieldError, ValidationProblem,
+    ValidationRejection,
+};
+#[cfg(feature = "validation")]
+pub use validator::*;
 
 // State
 pub use arvik_extract::FromRef;
@@ -232,6 +239,14 @@ pub mod health {
 
 #[cfg(feature = "health")]
 pub use arvik_observe::health::{HealthCheckResult, HealthRegistry};
+
+#[cfg(feature = "logging")]
+pub mod logging {
+    pub use arvik_observe::logging::*;
+}
+
+#[cfg(feature = "logging")]
+pub use arvik_observe::logging::{ArvikLogger, LogFormat, StructuredLoggingLayer};
 
 #[cfg(feature = "test-utils")]
 pub use arvik_test::{TestClient, TestRequestBuilder, TestResponse};
