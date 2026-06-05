@@ -59,6 +59,7 @@ opentelemetry = ["dep:arvik-observe", "arvik-observe/opentelemetry"]
 health = ["dep:arvik-observe", "arvik-observe/health"]
 logging = ["dep:arvik-observe", "arvik-observe/logging"]
 observability = ["metrics", "opentelemetry", "health", "logging"]
+runtime-metrics = ["arvik-hyper/runtime-metrics"]
 
 [dev-dependencies]
 trybuild = { workspace = true }

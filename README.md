@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.8.4-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.9.5-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -21,7 +21,7 @@
 
 It is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**, designed to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> ⚡ **v0.8.4 — Validation & Logging** Arvik now ships declarative request validation, structured logging, Prometheus metrics, OpenTelemetry tracing, health probes, proc macros, in-process test utilities, file/env configuration, and graceful shutdown. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> ⚡ **v0.9.5 — Performance Sprint** Arvik now ships socket tuning, HTTP/2 throughput presets, lower-copy body paths, runtime tuning helpers, benchmark examples, declarative validation, structured logging, Prometheus metrics, OpenTelemetry tracing, health probes, proc macros, test utilities, configuration, and graceful shutdown. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -40,7 +40,7 @@ Then in another terminal:
 
 ```bash
 curl http://localhost:8080/
-# => {"status":"healthy","framework":"Arvik","version":"0.8.4"}
+# => {"status":"healthy","framework":"Arvik","version":"0.9.5"}
 
 curl http://localhost:8080/users/42
 # => {"id":"42","name":"User from path param"}
@@ -114,6 +114,16 @@ cargo run --manifest-path examples/request_validation/Cargo.toml
 
 # Structured request logging, requires logging
 cargo run --manifest-path examples/structured_logging/Cargo.toml
+
+# Runtime and socket tuning example
+cargo run --manifest-path examples/performance_tuning/Cargo.toml --release
+
+# Benchmark endpoints
+cargo run --manifest-path examples/benchmarks/Cargo.toml --release --bin plaintext
+cargo run --manifest-path examples/benchmarks/Cargo.toml --release --bin json
+
+# Local benchmark script suite
+scripts/bench/run-all.sh
 ```
 
 The TLS examples listen on `0.0.0.0:8443`; the plain HTTP examples listen on
@@ -122,7 +132,7 @@ stack, while rustls is the guaranteed HTTP/2 ALPN backend.
 
 ---
 
-## Features (v0.8.4)
+## Features (v0.9.5)
 
 ### ✅ Type-Safe Extractors
 
@@ -449,6 +459,34 @@ serve_h2c_with_config(app, "0.0.0.0:8080", config).await?;
 
 `ServerConfig` is intentionally limited to connection and protocol tuning. File/env config loading lives in the opt-in `config` feature through `ArvikConfig`.
 
+For high-throughput deployments, `ServerConfig` also exposes low-level socket
+and listener tuning:
+
+```rust
+use std::time::Duration;
+use arvik::{RuntimeConfig, ServerConfig};
+
+let runtime = RuntimeConfig::new()
+    .worker_threads(std::thread::available_parallelism().map(usize::from).unwrap_or(1))
+    .max_blocking_threads(512)
+    .event_interval(61)
+    .global_queue_interval(61)
+    .max_io_events_per_tick(1024)
+    .build()?;
+
+let config = ServerConfig::http2_high_throughput()
+    .tcp_nodelay(true)
+    .tcp_keepalive(Duration::from_secs(60))
+    .reuse_address(true)
+    .backlog(4096)
+    .socket_recv_buffer_size(512 * 1024)
+    .socket_send_buffer_size(512 * 1024);
+```
+
+`runtime-metrics` is opt-in and forwards to `arvik-hyper/runtime-metrics`.
+The full Linux `io_uring` backend remains future experimental work; 0.9.x
+focuses on maintainable Tokio and socket tuning.
+
 HTTP/2 server push promises are not implemented in Arvik Hyper mode because the browser feature is deprecated and Hyper does not expose a stable push API. Use `Preload` / `PreloadLink` to emit `Link: rel=preload` headers instead.
 
 ### ✅ Static Assets
@@ -721,7 +759,7 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | **0.8.2** | Health Check Endpoints | ✅ Complete |
 | **0.8.3** | Request Validation | ✅ Complete |
 | **0.8.4** | Structured Logging | ✅ Complete |
-| 0.9.x | Performance Sprint | ⏳ Planned |
+| 0.9.x | Performance Sprint | ✅ Complete |
 | 0.10.x | Stabilization & Docs | ⏳ Planned |
 
 ---
@@ -734,7 +772,14 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical specification incl
 
 ## Performance
 
-Arvik aims to unify extreme ergonomics with world-class performance. Here is how Arvik compares against the Rust heavyweights in a simple TCP path routing test (`wrk -t4 -c100 -d10s`), built in `--release` mode and run simultaneously on the same hardware.
+Arvik aims to unify extreme ergonomics with world-class performance. The 0.9.x
+benchmark suite lives in `examples/benchmarks` and can be run locally with
+`scripts/bench/run-all.sh`. Local numbers depend on CPU, kernel, governor,
+open-file limits, and background load; the manual GitHub benchmark workflow is
+a smoke/artifact workflow, not a release-grade performance claim.
+
+Historical simple TCP path routing numbers (`wrk -t4 -c100 -d10s`, release
+mode, same hardware):
 
 | Framework | Version | Requests / sec | Latency (avg) | Underlying Engine |
 | --- | --- | --- | --- | --- |
@@ -742,7 +787,9 @@ Arvik aims to unify extreme ergonomics with world-class performance. Here is how
 | Axum | v0.8.x | `301,439 req/s` | `349 µs` | Tokio / Hyper 1.x |
 | **Arvik** | **v0.3.4** | **`307,177 req/s`** | **`333 µs`** | Tokio / Hyper 1.x |
 
-*Tested using `wrk` with 100 concurrent workers across 4 threads for 10 seconds. Arvik achieves performance completely matched with Axum out of the box, powered by its zero-allocation radix trie path routing.*
+DB-style benchmark bins are behind the example-local `postgres` feature. They
+use in-memory fallback data when `DATABASE_URL` is absent so compile checks and
+smoke runs remain deterministic.
 
 ---
 

@@ -44,7 +44,7 @@
 //! }
 //! ```
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use http::{HeaderMap, StatusCode};
 use http_body_util::BodyExt as _;
 
@@ -334,6 +334,41 @@ mod tests {
         assert_eq!(collected_trailers.get("x-checksum").unwrap(), "abc123");
         assert_eq!(collected.to_bytes(), Bytes::from_static(b"body"));
     }
+
+    #[tokio::test]
+    async fn json_response_serializes_to_bytes() {
+        let response = Json(serde_json::json!({ "name": "Arvik" })).into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(http::header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            response.into_body().to_bytes().await.unwrap(),
+            Bytes::from_static(br#"{"name":"Arvik"}"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn json_response_handles_serialization_failure() {
+        struct Fails;
+
+        impl serde::Serialize for Fails {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("nope"))
+            }
+        }
+
+        let response = Json(Fails).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.into_body().to_bytes().await.unwrap(),
+            Bytes::from_static(br#"{"error":"Serialization failed","code":500}"#)
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -414,10 +449,11 @@ pub struct Json<T>(pub T);
 
 impl<T: serde::Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        match serde_json::to_vec(&self.0) {
-            Ok(bytes) => ResponseBuilder::new()
+        let mut writer = BytesMut::with_capacity(128).writer();
+        match serde_json::to_writer(&mut writer, &self.0) {
+            Ok(()) => ResponseBuilder::new()
                 .header(http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from_bytes(Bytes::from(bytes))),
+                .body(Body::from_bytes(writer.into_inner().freeze())),
             Err(err) => {
                 tracing::error!("JSON serialization failed: {err}");
                 ResponseBuilder::new()

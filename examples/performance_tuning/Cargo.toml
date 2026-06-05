@@ -1,0 +1,9 @@
+[package]
+name = "performance_tuning"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["http2"] }
+tokio = { version = "1", features = ["full"] }

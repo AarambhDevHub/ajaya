@@ -513,7 +513,7 @@ impl Drop for InFlightGuard {
 fn matched_route(extensions: &http::Extensions) -> String {
     extensions
         .get::<MatchedPathExt>()
-        .map(|matched| matched.0.clone())
+        .map(|matched| matched.0.to_string())
         .unwrap_or_else(|| UNKNOWN_ROUTE.to_string())
 }
 

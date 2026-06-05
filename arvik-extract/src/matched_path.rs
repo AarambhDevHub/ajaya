@@ -56,7 +56,7 @@ impl<S: Send + Sync> FromRequestParts<S> for MatchedPath {
         parts
             .extensions()
             .get::<MatchedPathExt>()
-            .map(|ext| MatchedPath(ext.0.clone()))
+            .map(|ext| MatchedPath(ext.0.to_string()))
             .ok_or(MatchedPathRejection)
     }
 }

@@ -14,7 +14,7 @@
 //!     .text("Hello, Arvik!");
 //! ```
 
-use bytes::Bytes;
+use bytes::{BufMut, BytesMut};
 use http::StatusCode;
 
 use crate::Body;
@@ -83,9 +83,11 @@ impl ResponseBuilder {
     /// Serializes `data` as JSON, sets `Content-Type: application/json`,
     /// and returns the response.
     pub fn json<T: serde::Serialize>(self, data: &T) -> Response {
-        let json_bytes = serde_json::to_vec(data).expect("valid JSON serialization");
+        let mut writer = BytesMut::with_capacity(128).writer();
+        serde_json::to_writer(&mut writer, data).expect("valid JSON serialization");
+        let json_bytes = writer.into_inner().freeze();
         self.header(http::header::CONTENT_TYPE, "application/json")
-            .body(Body::from_bytes(Bytes::from(json_bytes)))
+            .body(Body::from_bytes(json_bytes))
     }
 
     /// Build an HTML response.

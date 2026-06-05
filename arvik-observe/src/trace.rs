@@ -121,7 +121,7 @@ where
             let route = response
                 .extensions()
                 .get::<MatchedPathExt>()
-                .map(|matched| matched.0.as_str())
+                .map(|matched| matched.0.as_ref())
                 .unwrap_or("__unknown");
 
             span.record("http.status_code", status.as_u16());
@@ -480,7 +480,7 @@ mod tests {
             response
                 .extensions()
                 .get::<MatchedPathExt>()
-                .map(|matched| matched.0.as_str()),
+                .map(|matched| matched.0.as_ref()),
             Some("/users/{id}")
         );
     }

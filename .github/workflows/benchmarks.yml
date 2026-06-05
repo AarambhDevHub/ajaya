@@ -1,0 +1,36 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  WRK_DURATION: 5s
+  HEY_DURATION: 5s
+
+jobs:
+  smoke:
+    name: Benchmark smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install benchmark tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wrk golang-go
+          go install github.com/rakyll/hey@latest
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Run benchmark smoke suite
+        run: bash scripts/bench/run-all.sh
+
+      - name: Upload benchmark artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arvik-benchmark-results
+          path: target/bench-results

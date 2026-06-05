@@ -170,6 +170,9 @@ pub use arvik_extract::rejection;
 // ---------------------------------------------------------------------------
 // Server functionality
 // ---------------------------------------------------------------------------
+pub use arvik_hyper::RuntimeConfig;
+#[cfg(feature = "runtime-metrics")]
+pub use arvik_hyper::RuntimeMetricsHandle;
 pub use arvik_hyper::Server;
 pub use arvik_hyper::ServerConfig;
 pub use arvik_hyper::{ConnectionInfo, ShutdownConfig, default_shutdown_signal};

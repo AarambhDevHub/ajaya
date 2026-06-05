@@ -1,0 +1,56 @@
+[package]
+name = "arvik_benchmarks"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[features]
+default = []
+postgres = []
+
+[dependencies]
+arvik = { path = "../../arvik", features = ["http2", "static-files"] }
+bytes = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tower-layer = "0.3"
+
+[[bin]]
+name = "plaintext"
+path = "src/bin/plaintext.rs"
+
+[[bin]]
+name = "json"
+path = "src/bin/json.rs"
+
+[[bin]]
+name = "path_params"
+path = "src/bin/path_params.rs"
+
+[[bin]]
+name = "middleware"
+path = "src/bin/middleware.rs"
+
+[[bin]]
+name = "static_files"
+path = "src/bin/static_files.rs"
+
+[[bin]]
+name = "h2c"
+path = "src/bin/h2c.rs"
+
+[[bin]]
+name = "db_single"
+path = "src/bin/db_single.rs"
+required-features = ["postgres"]
+
+[[bin]]
+name = "db_multiple"
+path = "src/bin/db_multiple.rs"
+required-features = ["postgres"]
+
+[[bin]]
+name = "fortunes"
+path = "src/bin/fortunes.rs"
+required-features = ["postgres"]

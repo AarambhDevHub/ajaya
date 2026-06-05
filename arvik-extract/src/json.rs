@@ -26,7 +26,7 @@ use arvik_core::extract::FromRequest;
 use arvik_core::into_response::IntoResponse;
 use arvik_core::request::Request;
 use arvik_core::response::{Response, ResponseBuilder};
-use bytes::Bytes;
+use bytes::{BufMut, BytesMut};
 use http::StatusCode;
 use serde::de::DeserializeOwned;
 
@@ -72,10 +72,11 @@ where
 
 impl<T: serde::Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        match serde_json::to_vec(&self.0) {
-            Ok(json_bytes) => ResponseBuilder::new()
+        let mut writer = BytesMut::with_capacity(128).writer();
+        match serde_json::to_writer(&mut writer, &self.0) {
+            Ok(()) => ResponseBuilder::new()
                 .header(http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from_bytes(Bytes::from(json_bytes))),
+                .body(Body::from_bytes(writer.into_inner().freeze())),
             Err(err) => {
                 let body = format!("{{\"error\":\"JSON serialization failed: {}\"}}", err);
                 ResponseBuilder::new()

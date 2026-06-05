@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.5] — 2026-06-05 — Performance Sprint
+
+### Added
+
+- Low-level socket/listener tuning on `ServerConfig`: TCP_NODELAY, keepalive,
+  reuse port/address, backlog, socket buffers, and accept worker settings.
+- HTTP/2 performance presets through `ServerConfig::http2_low_latency()` and
+  `ServerConfig::http2_high_throughput()`.
+- `RuntimeConfig` for tuned Tokio runtime construction.
+- Optional `runtime-metrics` facade feature forwarding to
+  `arvik-hyper/runtime-metrics`.
+- Lower-copy `Body` constructors: `from_static`, `from_chunks`, and
+  `is_empty_hint`.
+- Benchmark examples under `examples/benchmarks`.
+- Runtime/socket tuning example under `examples/performance_tuning`.
+- Manual benchmark workflow that uploads benchmark artifacts.
+- `scripts/bench/wrk.sh`, `scripts/bench/hey.sh`, and
+  `scripts/bench/run-all.sh`.
+
+### Changed
+
+- Workspace version bumped to `0.9.5`.
+- Router matched paths now use interned `Arc<str>` metadata.
+- Path parameter keys use stack-backed `SmallVec` storage with interned names.
+- JSON responses serialize into `BytesMut` and freeze into `Bytes`.
+- Arvik config maps socket/listener settings into `ServerConfig`.
+
+### Notes
+
+- The planned full Linux `io_uring` backend is deferred as future experimental
+  work. The 0.9.x completion path is maintainable Tokio/socket tuning plus
+  optional runtime metrics.
+- Benchmark CI is manual and artifact-based, not PR-commenting or release
+  gating.
+
+---
+
 ## [0.8.4] — 2026-06-05 — Structured Logging
 
 ### Added

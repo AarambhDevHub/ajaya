@@ -136,6 +136,36 @@ impl ArvikConfig {
         if let Some(max) = self.server.max_connections {
             config = config.max_connections(max);
         }
+        if let Some(enabled) = self.server.tcp_nodelay {
+            config = config.tcp_nodelay(enabled);
+        }
+        if let Some(secs) = self.server.tcp_keepalive_secs {
+            config = config.tcp_keepalive(Duration::from_secs(secs));
+        }
+        if let Some(secs) = self.server.tcp_keepalive_interval_secs {
+            config = config.tcp_keepalive_interval(Duration::from_secs(secs));
+        }
+        if let Some(retries) = self.server.tcp_keepalive_retries {
+            config = config.tcp_keepalive_retries(retries);
+        }
+        if self.server.reuse_port {
+            config = config.reuse_port(true);
+        }
+        if self.server.reuse_address {
+            config = config.reuse_address(true);
+        }
+        if let Some(backlog) = self.server.backlog {
+            config = config.backlog(backlog as i32);
+        }
+        if let Some(size) = self.server.socket_recv_buffer_size {
+            config = config.socket_recv_buffer_size(size);
+        }
+        if let Some(size) = self.server.socket_send_buffer_size {
+            config = config.socket_send_buffer_size(size);
+        }
+        if let Some(workers) = self.server.accept_workers {
+            config = config.accept_workers(workers);
+        }
         if let Some(size) = self.http2.initial_stream_window_size {
             config = config.http2_initial_stream_window_size(size);
         }
@@ -180,6 +210,36 @@ impl ArvikConfig {
         validate_nonzero(self.server.backlog, "server.backlog")?;
         validate_nonzero(self.server.max_connections, "server.max_connections")?;
         validate_nonzero(self.server.body_limit, "server.body_limit")?;
+        validate_nonzero(self.server.tcp_keepalive_secs, "server.tcp_keepalive_secs")?;
+        validate_nonzero(
+            self.server.tcp_keepalive_interval_secs,
+            "server.tcp_keepalive_interval_secs",
+        )?;
+        validate_nonzero(
+            self.server.tcp_keepalive_retries,
+            "server.tcp_keepalive_retries",
+        )?;
+        validate_nonzero(
+            self.server.socket_recv_buffer_size,
+            "server.socket_recv_buffer_size",
+        )?;
+        validate_nonzero(
+            self.server.socket_send_buffer_size,
+            "server.socket_send_buffer_size",
+        )?;
+        validate_nonzero(self.server.accept_workers, "server.accept_workers")?;
+        if self.server.accept_workers.unwrap_or(1) > 1 && !self.server.reuse_port {
+            return Err(ConfigError::Validation(
+                "server.accept_workers greater than 1 requires server.reuse_port = true".into(),
+            ));
+        }
+        if let Some(backlog) = self.server.backlog {
+            if backlog > i32::MAX as u32 {
+                return Err(ConfigError::Validation(
+                    "server.backlog must fit into i32".into(),
+                ));
+            }
+        }
         validate_nonzero(
             self.http2.initial_stream_window_size,
             "http2.initial_stream_window_size",
@@ -244,6 +304,24 @@ pub struct ServerSection {
     pub max_connections: Option<usize>,
     /// Application request body limit. Apply with `RequestBodyLimitLayer`.
     pub body_limit: Option<usize>,
+    /// Explicit TCP_NODELAY setting for accepted sockets.
+    pub tcp_nodelay: Option<bool>,
+    /// TCP keepalive idle time in seconds.
+    pub tcp_keepalive_secs: Option<u64>,
+    /// TCP keepalive probe interval in seconds.
+    pub tcp_keepalive_interval_secs: Option<u64>,
+    /// TCP keepalive retry count where supported.
+    pub tcp_keepalive_retries: Option<u32>,
+    /// Enable SO_REUSEPORT for tuned listeners.
+    pub reuse_port: bool,
+    /// Enable SO_REUSEADDR for tuned listeners.
+    pub reuse_address: bool,
+    /// Listener receive buffer size.
+    pub socket_recv_buffer_size: Option<usize>,
+    /// Listener send buffer size.
+    pub socket_send_buffer_size: Option<usize>,
+    /// Number of accept worker listener sockets.
+    pub accept_workers: Option<usize>,
 }
 
 impl Default for ServerSection {
@@ -255,6 +333,15 @@ impl Default for ServerSection {
             backlog: None,
             max_connections: None,
             body_limit: None,
+            tcp_nodelay: None,
+            tcp_keepalive_secs: None,
+            tcp_keepalive_interval_secs: None,
+            tcp_keepalive_retries: None,
+            reuse_port: false,
+            reuse_address: false,
+            socket_recv_buffer_size: None,
+            socket_send_buffer_size: None,
+            accept_workers: None,
         }
     }
 }
@@ -562,6 +649,25 @@ fn parse_env_override(
         "SERVER_BACKLOG" => number_value!(&["server", "backlog"], u32),
         "SERVER_MAX_CONNECTIONS" => number_value!(&["server", "max_connections"], usize),
         "SERVER_BODY_LIMIT" => number_value!(&["server", "body_limit"], usize),
+        "SERVER_TCP_NODELAY" => bool_value!(&["server", "tcp_nodelay"]),
+        "SERVER_TCP_KEEPALIVE_SECS" => {
+            number_value!(&["server", "tcp_keepalive_secs"], u64)
+        }
+        "SERVER_TCP_KEEPALIVE_INTERVAL_SECS" => {
+            number_value!(&["server", "tcp_keepalive_interval_secs"], u64)
+        }
+        "SERVER_TCP_KEEPALIVE_RETRIES" => {
+            number_value!(&["server", "tcp_keepalive_retries"], u32)
+        }
+        "SERVER_REUSE_PORT" => bool_value!(&["server", "reuse_port"]),
+        "SERVER_REUSE_ADDRESS" => bool_value!(&["server", "reuse_address"]),
+        "SERVER_SOCKET_RECV_BUFFER_SIZE" => {
+            number_value!(&["server", "socket_recv_buffer_size"], usize)
+        }
+        "SERVER_SOCKET_SEND_BUFFER_SIZE" => {
+            number_value!(&["server", "socket_send_buffer_size"], usize)
+        }
+        "SERVER_ACCEPT_WORKERS" => number_value!(&["server", "accept_workers"], usize),
         "HTTP1_KEEP_ALIVE" => bool_value!(&["http1", "keep_alive"]),
         "HTTP1_HALF_CLOSE" => bool_value!(&["http1", "half_close"]),
         "HTTP1_TITLE_CASE_HEADERS" => bool_value!(&["http1", "title_case_headers"]),
@@ -839,6 +945,58 @@ mod tests {
 
         let err = ArvikConfig::builder().file(&path).build().unwrap_err();
         assert!(err.to_string().contains("server.max_connections"));
+    }
+
+    #[test]
+    fn server_socket_fields_map_to_server_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("arvik.toml");
+        std::fs::write(
+            &path,
+            r#"
+                [server]
+                tcp_nodelay = true
+                tcp_keepalive_secs = 60
+                tcp_keepalive_interval_secs = 5
+                tcp_keepalive_retries = 3
+                reuse_port = true
+                reuse_address = true
+                backlog = 4096
+                socket_recv_buffer_size = 262144
+                socket_send_buffer_size = 524288
+                accept_workers = 2
+            "#,
+        )
+        .unwrap();
+
+        let config = ArvikConfig::builder().file(&path).build().unwrap();
+        let server = config.server_config();
+        assert_eq!(server.tcp_nodelay_setting(), Some(true));
+        assert_eq!(
+            server.tcp_keepalive_duration(),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(
+            server.tcp_keepalive_interval_duration(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(server.tcp_keepalive_retries_count(), Some(3));
+        assert!(server.reuse_port_enabled());
+        assert!(server.reuse_address_enabled());
+        assert_eq!(server.backlog_size(), Some(4096));
+        assert_eq!(server.socket_recv_buffer_size_value(), Some(262144));
+        assert_eq!(server.socket_send_buffer_size_value(), Some(524288));
+        assert_eq!(server.accept_workers_count(), 2);
+    }
+
+    #[test]
+    fn accept_workers_requires_reuse_port_in_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("arvik.toml");
+        std::fs::write(&path, "[server]\naccept_workers = 2\n").unwrap();
+
+        let err = ArvikConfig::builder().file(&path).build().unwrap_err();
+        assert!(err.to_string().contains("requires server.reuse_port"));
     }
 
     #[test]
