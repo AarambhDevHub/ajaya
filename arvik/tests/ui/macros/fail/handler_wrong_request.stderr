@@ -1,0 +1,5 @@
+error: #[handler] call method second argument must be arvik::Request
+ --> tests/ui/macros/fail/handler_wrong_request.rs:6:26
+  |
+6 |     async fn call(&self, _req: String) -> &'static str {
+  |                          ^^^^^^^^^^^^

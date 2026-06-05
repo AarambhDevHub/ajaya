@@ -1,0 +1,7 @@
+error: unsupported HTTP method
+ --> tests/ui/macros/fail/route_invalid_args.rs:1:1
+  |
+1 | #[arvik::route(BAD, "/bad")]
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the attribute macro `arvik::route` (in Nightly builds, run with -Z macro-backtrace for more info)

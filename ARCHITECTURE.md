@@ -1180,12 +1180,14 @@ let res = client.post("/upload")
 
 ## 19. Proc Macros
 
+Proc macros are opt-in through `arvik = { features = ["macros"] }`.
+
 ### 19.1 `#[debug_handler]`
 
 ```rust
 // Gives MUCH better error messages when handler type-checks fail
 // (same as axum's #[debug_handler])
-#[arvik::debug_handler]
+#[arvik::debug_handler(state = AppState)]
 async fn handler(State(state): State<AppState>, Json(body): Json<Payload>) -> impl IntoResponse {
     // Without debug_handler, rustc error points to .route(), with it — points here
 }
@@ -1195,34 +1197,45 @@ async fn handler(State(state): State<AppState>, Json(body): Json<Payload>) -> im
 
 ```rust
 // Attach routing metadata directly to functions
-#[arvik::route(GET, "/users/:id")]
+#[arvik::route(GET, "/users/{id}")]
 async fn get_user(Path(id): Path<Uuid>) -> impl IntoResponse {
     // ...
 }
 
+#[arvik::post("/users")]
+async fn create_user(Json(body): Json<CreateUser>) -> impl IntoResponse {
+    // ...
+}
+
 // Collect and register all annotated routes
-let app = Router::new().routes(arvik::collect_routes![get_user, create_user, delete_user]);
+let app = Router::new().routes(arvik::collect_routes![get_user, create_user]);
 ```
+
+`collect_routes!` detects duplicate path/method pairs within the same collection.
+The route macros use router-native `{id}` and `{*path}` segments.
 
 ### 19.3 `#[handler]`
 
 ```rust
 // Impl Handler trait for structs (useful for handlers that need fields)
-#[arvik::handler]
+#[derive(Clone)]
 struct RateLimitedHandler {
-    inner: Arc<dyn Handler>,
     limiter: Arc<RateLimiter>,
 }
 
+#[arvik::handler]
 impl RateLimitedHandler {
-    async fn call(&self, req: Request) -> Response {
+    async fn call(&self, req: Request) -> impl IntoResponse {
         if self.limiter.check().is_err() {
             return StatusCode::TOO_MANY_REQUESTS.into_response();
         }
-        self.inner.call(req).await
+        format!("accepted {}", req.uri().path())
     }
 }
 ```
+
+`#[handler]` is intentionally applied to the inherent `impl` block. A Rust
+attribute on the struct cannot inspect a later `impl` block.
 
 ---
 

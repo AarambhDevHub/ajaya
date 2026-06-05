@@ -45,6 +45,11 @@ impl MethodFilter {
         (self.0 & other.0) == other.0
     }
 
+    /// Return the raw method bitmask.
+    pub const fn bits(self) -> u16 {
+        self.0
+    }
+
     /// Check if this filter matches the given HTTP method.
     pub fn matches(self, method: &http::Method) -> bool {
         self.contains(Self::from_method(method))

@@ -1,0 +1,5 @@
+error: handlers using State<T> must declare #[debug_handler(state = AppState)]
+ --> tests/ui/macros/fail/debug_missing_state.rs:7:14
+  |
+7 | async fn bad(State(_state): State<AppState>) -> &'static str {
+  |              ^^^^^

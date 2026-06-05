@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.6.5-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.2-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -21,7 +21,7 @@
 
 It is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**, designed to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> ⚡ **v0.6.5 — Static Assets** Arvik now ships rustls HTTPS, TLS hot reload, native-tls support, h2c, HTTP/2 tuning, filesystem static files, and embedded static assets. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> ⚡ **v0.7.2 — Proc Macros** Arvik now ships rustls HTTPS, HTTP/2 tuning, static assets, and opt-in `#[debug_handler]`, `#[route]`, and `#[handler]` macros. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -40,7 +40,7 @@ Then in another terminal:
 
 ```bash
 curl http://localhost:8080/
-# => {"status":"healthy","framework":"Arvik","version":"0.6.5"}
+# => {"status":"healthy","framework":"Arvik","version":"0.7.2"}
 
 curl http://localhost:8080/users/42
 # => {"id":"42","name":"User from path param"}
@@ -81,6 +81,15 @@ cargo run --manifest-path examples/static_files/Cargo.toml
 
 # Embedded static files, requires embedded-static
 cargo run --manifest-path examples/embedded_static/Cargo.toml
+
+# Better handler diagnostics, requires macros
+cargo run --manifest-path examples/debug_handler/Cargo.toml
+
+# Attribute routes, requires macros
+cargo run --manifest-path examples/route_macro/Cargo.toml
+
+# Struct handlers, requires macros
+cargo run --manifest-path examples/handler_macro/Cargo.toml
 ```
 
 The TLS examples listen on `0.0.0.0:8443`; the plain HTTP examples listen on
@@ -89,7 +98,7 @@ stack, while rustls is the guaranteed HTTP/2 ALPN backend.
 
 ---
 
-## Features (v0.6.5)
+## Features (v0.7.2)
 
 ### ✅ Type-Safe Extractors
 
@@ -272,7 +281,7 @@ Full WebSocket support via `arvik-ws`, built on `tokio-tungstenite`. Auto-pong k
 >
 > ```toml
 > # Opt in to WebSocket
-> arvik = { version = "0.6", features = ["ws"] }
+> arvik = { version = "0.7", features = ["ws"] }
 > ```
 >
 > Default build (`arvik = "0.6"`) is HTTP-only — no WebSocket compiled in.
@@ -336,7 +345,7 @@ Full Server-Sent Events support via `arvik-sse`. Send real-time updates to the b
 > **SSE is opt-in.** Enable it by adding the `sse` feature to your `Cargo.toml`:
 >
 > ```toml
-> arvik = { version = "0.6", features = ["sse"] }
+> arvik = { version = "0.7", features = ["sse"] }
 > ```
 
 ```rust
@@ -369,7 +378,7 @@ let app = Router::new().route("/stream", get(json_stream));
 TLS support is opt-in. Rustls is the primary backend and provides the guaranteed HTTP/2 ALPN path.
 
 ```toml
-arvik = { version = "0.6", features = ["tls"] }
+arvik = { version = "0.7", features = ["tls"] }
 ```
 
 ```rust
@@ -387,7 +396,7 @@ serve_tls(app, "0.0.0.0:443", tls).await?;
 Hot reload uses the `tls-hot-reload` feature and debounces file changes. Failed reloads keep the previous config active, and existing connections continue using the session they already accepted.
 
 ```toml
-arvik = { version = "0.6", features = ["tls-hot-reload"] }
+arvik = { version = "0.7", features = ["tls-hot-reload"] }
 ```
 
 ```rust
@@ -398,7 +407,7 @@ let _watcher = tls.watch_pem_files("cert.pem", "key.pem", std::time::Duration::f
 Native TLS is available for platform TLS stacks. ALPN support is best-effort and platform-dependent; if HTTP/2 ALPN is not available, Arvik falls back cleanly to HTTP/1.1.
 
 ```toml
-arvik = { version = "0.6", features = ["native-tls"] }
+arvik = { version = "0.7", features = ["native-tls"] }
 ```
 
 HTTP/2 over cleartext is available for internal service-to-service traffic:
@@ -423,7 +432,7 @@ HTTP/2 server push promises are not implemented in Arvik Hyper mode because the 
 Filesystem static serving is opt-in with `static-files`.
 
 ```toml
-arvik = { version = "0.6", features = ["static-files"] }
+arvik = { version = "0.7", features = ["static-files"] }
 ```
 
 ```rust
@@ -448,7 +457,7 @@ let app = Router::new()
 Embedded static assets use `embedded-static` and `rust-embed`.
 
 ```toml
-arvik = { version = "0.6", features = ["embedded-static"] }
+arvik = { version = "0.7", features = ["embedded-static"] }
 ```
 
 ```rust
@@ -470,6 +479,47 @@ let app = Router::new().nest_service(
 
 Static responses include MIME detection, `Last-Modified`, `ETag`, conditional `304`, single byte ranges, optional directory listings, and best-match `.br` / `.gz` precompressed variants.
 
+### ✅ Proc Macros
+
+Proc macros are opt-in with `macros`.
+
+```toml
+arvik = { version = "0.7", features = ["macros"] }
+```
+
+```rust
+use arvik::{Path, Router, State, debug_handler};
+
+#[derive(Clone)]
+struct AppState;
+
+#[debug_handler(state = AppState)]
+async fn echo(State(_state): State<AppState>, body: String) -> String {
+    body
+}
+
+#[arvik::get("/users/{id}")]
+async fn get_user(Path(id): Path<u64>) -> String {
+    format!("User #{id}")
+}
+
+#[derive(Clone)]
+struct Inspect;
+
+#[arvik::handler]
+impl Inspect {
+    async fn call(&self, req: arvik::Request) -> String {
+        req.uri().path().to_string()
+    }
+}
+
+let app: Router<AppState> = Router::new()
+    .routes(arvik::collect_routes![get_user])
+    .route("/inspect", arvik::get(Inspect));
+```
+
+`collect_routes!` detects duplicate path/method pairs within one collection at compile time. Use an impl-block `#[handler]`; a struct attribute cannot inspect a later inherent `impl`.
+
 ---
 
 ## Workspace Structure
@@ -486,7 +536,7 @@ arvik/
 ├── arvik-sse/          # Server-Sent Events (v0.5.1 ✅)
 ├── arvik-static/       # Static file serving + embedded assets (v0.6.x ✅)
 ├── arvik-tls/          # TLS via rustls + native-tls (v0.6.x ✅)
-├── arvik-macros/       # Proc macros: #[handler], #[route] (coming in v0.7.x)
+├── arvik-macros/       # Proc macros: #[debug_handler], #[route], #[handler] (v0.7.x ✅)
 └── arvik-test/         # Testing utilities (coming in v0.7.x)
 ```
 
@@ -512,7 +562,10 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | **0.6.3** | HTTP/2 Tuning | ✅ Complete |
 | **0.6.4** | Static File Serving | ✅ Complete |
 | **0.6.5** | Embedded Static Files | ✅ Complete |
-| 0.7.x | Macros, Testing, Config | ⏳ Planned |
+| **0.7.0** | `#[debug_handler]` Macro | ✅ Complete |
+| **0.7.1** | `#[route]` Macro | ✅ Complete |
+| **0.7.2** | `#[handler]` Macro | ✅ Complete |
+| 0.7.3+ | Test Client, Config | ⏳ Planned |
 | 0.8.x | Observability & Security | ⏳ Planned |
 | 0.9.x | Performance Sprint | ⏳ Planned |
 | 0.10.x | Stabilization & Docs | ⏳ Planned |

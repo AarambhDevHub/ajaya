@@ -1,0 +1,5 @@
+error: #[debug_handler] requires an async function
+ --> tests/ui/macros/fail/debug_non_async.rs:4:1
+  |
+4 | fn bad() -> &'static str {
+  | ^^

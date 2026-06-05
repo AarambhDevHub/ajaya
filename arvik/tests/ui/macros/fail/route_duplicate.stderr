@@ -1,0 +1,5 @@
+error: duplicate route in collect_routes!
+ --> tests/ui/macros/fail/route_duplicate.rs:9:79
+  |
+9 |     let _app: Router<()> = Router::new().routes(arvik::collect_routes![first, first]);
+  |                                                                               ^^^^^
