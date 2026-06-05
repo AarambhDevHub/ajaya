@@ -1538,6 +1538,13 @@ concurrency, keep-alive, frame, and buffer settings.
 
 ### 26.4 Benchmark Targets (TechEmpower Round 22 equivalent)
 
+The benchmark suite keeps HTTP/1.1 and HTTP/2 h2c modes separate. HTTP/1.1
+targets start normal `serve` benchmark servers and run `wrk` plus `hey`.
+HTTP/2 h2c targets start the dedicated `serve_h2c` benchmark server and run
+`h2load` only after an h2load readiness probe succeeds. Smoke output and failed
+zero-start h2load runs are validation artifacts, not published benchmark
+numbers.
+
 | Test | Target | Actix-web |
 |---|---|---|
 | Plaintext | 800K req/sec | 600K req/sec |

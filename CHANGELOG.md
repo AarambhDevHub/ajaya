@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Hardened benchmark scripts and workflow after the first manual Actions run:
+  HTTP/1 `wrk`/`hey` and h2c `h2load` now run against separate server modes,
+  readiness is checked per protocol, stale server processes are cleaned up, and
+  raw outputs plus `summary.json` / `summary.md` are generated separately.
+
 ---
 
 ## [0.9.5] — 2026-06-05 — Performance Sprint
