@@ -1,10 +1,5 @@
-error[E0308]: mismatched types
-  --> tests/ui/macros/fail/route_duplicate.rs:14:49
-   |
-14 |     let _app: Router<()> = Router::new().routes(arvik::collect_routes![first, second]);
-   |                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |                                                 |
-   |                                                 expected an array with a size of 1, found one with a size of 0
-   |                                                 help: consider specifying the actual array length: `0`
-   |
-   = note: this error originates in the macro `arvik::collect_routes` (in Nightly builds, run with -Z macro-backtrace for more info)
+error: duplicate route in collect_routes!
+ --> tests/ui/macros/fail/route_duplicate.rs:9:79
+  |
+9 |     let _app: Router<()> = Router::new().routes(arvik::collect_routes![first, first]);
+  |                                                                               ^^^^^

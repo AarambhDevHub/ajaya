@@ -2,7 +2,7 @@
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::{format_ident, quote, quote_spanned};
+use quote::{ToTokens, format_ident, quote, quote_spanned};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -386,9 +386,20 @@ fn expand_collect_routes(routes: RouteList) -> TokenStream2 {
     let mut helpers = Vec::new();
     let mut metas = Vec::new();
     let mut errors = Vec::new();
+    let paths: Vec<Path> = routes.paths.into_iter().collect();
 
-    for path in routes.paths {
-        match route_paths(path) {
+    for (idx, path) in paths.iter().enumerate() {
+        for previous in paths.iter().take(idx) {
+            if path_tokens_eq(previous, path) {
+                errors.push(
+                    Error::new_spanned(path, "duplicate route in collect_routes!")
+                        .to_compile_error(),
+                );
+                break;
+            }
+        }
+
+        match route_paths(path.clone()) {
             Ok((helper, meta)) => {
                 helpers.push(helper);
                 metas.push(meta);
@@ -417,6 +428,10 @@ fn expand_collect_routes(routes: RouteList) -> TokenStream2 {
             }
         }
     }
+}
+
+fn path_tokens_eq(left: &Path, right: &Path) -> bool {
+    left.to_token_stream().to_string() == right.to_token_stream().to_string()
 }
 
 fn expand_handler(input: ItemImpl) -> TokenStream2 {
