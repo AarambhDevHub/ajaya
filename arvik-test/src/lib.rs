@@ -326,32 +326,41 @@ impl TestWebSocket {
     pub async fn send(
         &mut self,
         message: impl Into<arvik_ws::Message>,
-    ) -> Result<(), arvik_ws::WsError> {
+    ) -> Result<(), TestWebSocketError> {
         use futures_util::SinkExt;
 
-        self.inner.send(message.into().into()).await
+        self.inner.send(message.into().into()).await?;
+        Ok(())
     }
 
     /// Receive the next WebSocket message.
-    pub async fn recv(&mut self) -> Option<Result<arvik_ws::Message, arvik_ws::WsError>> {
+    pub async fn recv(&mut self) -> Option<Result<arvik_ws::Message, TestWebSocketError>> {
         use futures_util::StreamExt;
 
-        self.inner
-            .next()
-            .await
-            .map(|result| result.map(arvik_ws::Message::from))
+        match self.inner.next().await {
+            Some(Ok(message)) => Some(Ok(arvik_ws::Message::from(message))),
+            Some(Err(err)) => Some(Err(Box::new(err))),
+            None => None,
+        }
     }
 
     /// Send a text message.
-    pub async fn send_text(&mut self, text: impl Into<String>) -> Result<(), arvik_ws::WsError> {
+    pub async fn send_text(&mut self, text: impl Into<String>) -> Result<(), TestWebSocketError> {
         self.send(arvik_ws::Message::Text(text.into())).await
     }
 
     /// Close the WebSocket and signal the test server to stop accepting.
-    pub async fn close(mut self) -> Result<(), arvik_ws::WsError> {
-        let result = self.inner.close(None).await;
-        self.stop_server();
-        result
+    pub async fn close(mut self) -> Result<(), TestWebSocketError> {
+        match self.inner.close(None).await {
+            Ok(()) => {
+                self.stop_server();
+                Ok(())
+            }
+            Err(err) => {
+                self.stop_server();
+                Err(Box::new(err))
+            }
+        }
     }
 
     fn stop_server(&mut self) {
