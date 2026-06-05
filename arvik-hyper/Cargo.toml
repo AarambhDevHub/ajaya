@@ -22,6 +22,8 @@ http-body-util = { workspace = true }
 bytes          = { workspace = true }
 tracing        = { workspace = true }
 tower-service  = { workspace = true }
+socket2        = { workspace = true }
+tokio-metrics  = { workspace = true, optional = true }
 
 [features]
 default = ["http1", "http2"]
@@ -31,3 +33,4 @@ tls = ["dep:arvik-tls", "arvik-tls/rustls"]
 tls-hot-reload = ["tls", "arvik-tls/tls-hot-reload"]
 native-tls = ["dep:arvik-tls", "arvik-tls/native-tls"]
 native-tls-vendored = ["native-tls", "arvik-tls/native-tls-vendored"]
+runtime-metrics = ["dep:tokio-metrics"]

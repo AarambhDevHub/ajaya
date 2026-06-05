@@ -270,7 +270,7 @@ where
             let route = response
                 .extensions()
                 .get::<MatchedPathExt>()
-                .map(|matched| matched.0.clone())
+                .map(|matched| matched.0.to_string())
                 .unwrap_or_else(|| "__unknown".to_string());
             let latency_ms = started.elapsed().as_millis();
 
@@ -468,7 +468,7 @@ mod tests {
             response
                 .extensions()
                 .get::<MatchedPathExt>()
-                .map(|matched| matched.0.as_str()),
+                .map(|matched| matched.0.as_ref()),
             Some("/users/{id}")
         );
     }

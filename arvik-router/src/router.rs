@@ -127,7 +127,7 @@ where
 ///
 /// Used by the `MatchedPath` extractor in `arvik-extract`.
 #[derive(Debug, Clone)]
-pub struct MatchedPathExt(pub String);
+pub struct MatchedPathExt(pub Arc<str>);
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
@@ -149,12 +149,28 @@ pub struct MatchedPathExt(pub String);
 /// ```
 pub struct Router<S = ()> {
     trie: matchit::Router<usize>,
-    routes: Vec<(String, MethodRouter<S>)>,
+    routes: Vec<RouteEntry<S>>,
     fallback: Option<Box<dyn ErasedHandler<S>>>,
     /// Layers applied to **all** requests (applied by `into_service`).
     layers: Vec<LayerFn>,
     /// Layers applied to **matched-route** requests only (applied per-dispatch).
     route_layers: Vec<LayerFn>,
+}
+
+struct RouteEntry<S> {
+    pattern: Arc<str>,
+    method_router: MethodRouter<S>,
+    param_names: Arc<[Arc<str>]>,
+}
+
+impl<S> RouteEntry<S> {
+    fn new(path: &str, method_router: MethodRouter<S>) -> Self {
+        Self {
+            pattern: Arc::from(path),
+            method_router,
+            param_names: extract_param_names(path).into(),
+        }
+    }
 }
 
 impl<S: Clone + Send + Sync + 'static> Router<S> {
@@ -179,20 +195,20 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
         if let Err(e) = self.trie.insert(path, idx) {
             panic!("Route conflict for `{path}`: {e}");
         }
-        self.routes.push((path.to_string(), method_router));
+        self.routes.push(RouteEntry::new(path, method_router));
         self
     }
 
     /// Register or merge a route emitted by proc macros.
     #[doc(hidden)]
     pub fn route_collected(mut self, path: &str, method_router: MethodRouter<S>) -> Self {
-        if let Some((_, existing)) = self
+        if let Some(existing) = self
             .routes
             .iter_mut()
-            .find(|(existing_path, _)| existing_path == path)
+            .find(|entry| entry.pattern.as_ref() == path)
         {
-            let current = std::mem::take(existing);
-            *existing = current.merge(method_router);
+            let current = std::mem::take(&mut existing.method_router);
+            existing.method_router = current.merge(method_router);
             return self;
         }
 
@@ -210,7 +226,8 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     /// Mount a sub-router under a path prefix (flatten strategy).
     pub fn nest(mut self, prefix: &str, other: Router<S>) -> Self {
         let prefix = prefix.trim_end_matches('/');
-        for (path, method_router) in other.routes {
+        for entry in other.routes {
+            let path = entry.pattern.as_ref();
             let full = if path == "/" {
                 format!("{prefix}/")
             } else {
@@ -220,19 +237,21 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
             if let Err(e) = self.trie.insert(&full, idx) {
                 panic!("Nested route conflict for `{full}`: {e}");
             }
-            self.routes.push((full, method_router));
+            self.routes
+                .push(RouteEntry::new(&full, entry.method_router));
         }
         self
     }
 
     /// Merge all routes from another router into this one.
     pub fn merge(mut self, other: Router<S>) -> Self {
-        for (path, method_router) in other.routes {
+        for entry in other.routes {
+            let path = entry.pattern.as_ref();
             let idx = self.routes.len();
-            if let Err(e) = self.trie.insert(&path, idx) {
+            if let Err(e) = self.trie.insert(path, idx) {
                 panic!("Merge conflict for `{path}`: {e}");
             }
-            self.routes.push((path, method_router));
+            self.routes.push(entry);
         }
         if self.fallback.is_none() {
             self.fallback = other.fallback;
@@ -342,10 +361,14 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     pub fn with_state(self, state: S) -> Router<()> {
         let state = Arc::new(state);
 
-        let routes: Vec<(String, MethodRouter<()>)> = self
+        let routes: Vec<RouteEntry<()>> = self
             .routes
             .into_iter()
-            .map(|(path, mr)| (path, mr.with_state((*state).clone())))
+            .map(|entry| RouteEntry {
+                pattern: entry.pattern,
+                method_router: entry.method_router.with_state((*state).clone()),
+                param_names: entry.param_names,
+            })
             .collect();
 
         let fallback: Option<Box<dyn ErasedHandler<()>>> = self.fallback.map(|f| {
@@ -371,23 +394,29 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     /// This method exists for backward compatibility and internal testing.
     /// For production serving use [`into_service`] (via [`serve_app`]).
     pub async fn call(&self, mut req: Request, state: S) -> Response {
-        let path = req.uri().path().to_string();
+        let path = req.uri().path();
 
-        match self.trie.at(&path) {
+        match self.trie.at(path) {
             Ok(matched) => {
                 let idx = *matched.value;
-                let pattern = self.routes[idx].0.clone();
+                let entry = &self.routes[idx];
+                let pattern = Arc::clone(&entry.pattern);
 
                 if !matched.params.is_empty() {
                     let mut pp = PathParams::new();
-                    for (k, v) in matched.params.iter() {
-                        pp.push(k.to_string(), percent_decode(v));
+                    for (idx, (k, v)) in matched.params.iter().enumerate() {
+                        let key = entry
+                            .param_names
+                            .get(idx)
+                            .cloned()
+                            .unwrap_or_else(|| Arc::from(k));
+                        pp.push(key, percent_decode(v));
                     }
                     req.extensions_mut().insert(pp);
                 }
                 req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
-                let mut response = self.routes[idx].1.call(req, state).await;
+                let mut response = entry.method_router.call(req, state).await;
                 response.extensions_mut().insert(MatchedPathExt(pattern));
                 response
             }
@@ -396,13 +425,13 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
                     let mut response = fb.clone_box().call(req, state).await;
                     response
                         .extensions_mut()
-                        .insert(MatchedPathExt("__fallback".to_string()));
+                        .insert(MatchedPathExt(Arc::from("__fallback")));
                     return response;
                 }
                 let mut response = not_found();
                 response
                     .extensions_mut()
-                    .insert(MatchedPathExt("__unmatched".to_string()));
+                    .insert(MatchedPathExt(Arc::from("__unmatched")));
                 response
             }
         }
@@ -458,36 +487,40 @@ impl<S: Clone + Send + Sync + 'static> Default for Router<S> {
 
 struct RouterInner {
     trie: matchit::Router<usize>,
-    routes: Vec<(String, MethodRouter<()>)>,
+    routes: Vec<RouteEntry<()>>,
     fallback: Option<Box<dyn ErasedHandler<()>>>,
     route_layers: Vec<LayerFn>,
 }
 
 impl RouterInner {
     async fn dispatch(&self, mut req: Request) -> Response {
-        let path = req.uri().path().to_string();
+        let path = req.uri().path();
 
-        match self.trie.at(&path) {
+        match self.trie.at(path) {
             Ok(matched) => {
                 let idx = *matched.value;
-                let pattern = self.routes[idx].0.clone();
+                let entry = &self.routes[idx];
+                let pattern = Arc::clone(&entry.pattern);
 
                 if !matched.params.is_empty() {
                     let mut pp = PathParams::new();
-                    for (k, v) in matched.params.iter() {
-                        pp.push(k.to_string(), percent_decode(v));
+                    for (idx, (k, v)) in matched.params.iter().enumerate() {
+                        let key = entry
+                            .param_names
+                            .get(idx)
+                            .cloned()
+                            .unwrap_or_else(|| Arc::from(k));
+                        pp.push(key, percent_decode(v));
                     }
                     req.extensions_mut().insert(pp);
                 }
                 req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
                 let mut response = if self.route_layers.is_empty() {
-                    // ── Fast path: no route-level layers ─────────────────────
-                    self.routes[idx].1.call(req, ()).await
+                    entry.method_router.call(req, ()).await
                 } else {
-                    // ── Apply route_layers around the method router ───────────
-                    let mr = self.routes[idx].1.clone();
-                    let base = BoxCloneService::new(MethodRouterService(mr));
+                    let base =
+                        BoxCloneService::new(MethodRouterService(entry.method_router.clone()));
                     let svc = apply_layers(base, &self.route_layers);
                     oneshot(svc, req).await
                 };
@@ -499,13 +532,13 @@ impl RouterInner {
                     let mut response = fb.clone_box().call(req, ()).await;
                     response
                         .extensions_mut()
-                        .insert(MatchedPathExt("__fallback".to_string()));
+                        .insert(MatchedPathExt(Arc::from("__fallback")));
                     return response;
                 }
                 let mut response = not_found();
                 response
                     .extensions_mut()
-                    .insert(MatchedPathExt("__unmatched".to_string()));
+                    .insert(MatchedPathExt(Arc::from("__unmatched")));
                 response
             }
         }
@@ -581,6 +614,16 @@ fn normalize_service_prefix(prefix: &str) -> String {
     }
 }
 
+fn extract_param_names(path: &str) -> Vec<Arc<str>> {
+    path.split('/')
+        .filter_map(|segment| {
+            let inner = segment.strip_prefix('{')?.strip_suffix('}')?;
+            let name = inner.strip_prefix('*').unwrap_or(inner);
+            (!name.is_empty()).then(|| Arc::from(name))
+        })
+        .collect()
+}
+
 /// Percent-decode a URL path segment in-place (ASCII-only fast path).
 fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
@@ -625,6 +668,13 @@ mod tests {
         assert_eq!(percent_decode("foo%2Fbar"), "foo/bar");
         assert_eq!(percent_decode("normal"), "normal");
         assert_eq!(percent_decode("100%25"), "100%");
+    }
+
+    #[test]
+    fn extracts_param_names_at_registration_time() {
+        let names = extract_param_names("/users/{id}/files/{*path}");
+        let names: Vec<_> = names.iter().map(|name| name.as_ref()).collect();
+        assert_eq!(names, vec!["id", "path"]);
     }
 
     #[test]
@@ -801,9 +851,34 @@ mod tests {
         assert_eq!(
             res.extensions()
                 .get::<MatchedPathExt>()
-                .map(|matched| matched.0.as_str()),
+                .map(|matched| matched.0.as_ref()),
             Some("/users/{id}")
         );
+    }
+
+    #[tokio::test]
+    async fn param_route_uses_interned_names_and_decodes_values() {
+        async fn h(req: arvik_core::Request) -> String {
+            let params = req.extensions().get::<PathParams>().unwrap();
+            format!(
+                "{}:{}",
+                params.get("id").unwrap(),
+                params.get("path").unwrap()
+            )
+        }
+
+        let mut app = Router::new()
+            .route("/users/{id}/files/{*path}", crate::get(h))
+            .into_service();
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/users/42/files/a%20b/report")
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        );
+
+        let res = app.call(req).await.unwrap();
+        assert_eq!(res.into_body().to_string().await.unwrap(), "42:a b/report");
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 use std::convert::Infallible;
 use std::future::{Future, pending};
+use std::io;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -17,7 +18,9 @@ use arvik_router::{MethodRouter, Router};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
-use tokio::net::TcpListener;
+use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
+use tokio::net::{TcpListener, TcpStream, lookup_host};
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tower_service::Service as _;
 
@@ -27,7 +30,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// The Arvik HTTP server.
 pub struct Server {
-    listener: TcpListener,
+    listeners: Vec<TcpListener>,
     addr: SocketAddr,
     config: ServerConfig,
 }
@@ -40,11 +43,14 @@ impl Server {
 
     /// Bind the server to the given address with explicit runtime/protocol tuning.
     pub async fn bind_with_config(addr: &str, config: ServerConfig) -> Result<Self, BoxError> {
-        let listener = TcpListener::bind(addr).await?;
-        let addr = listener.local_addr()?;
+        let listeners = bind_listeners(addr, &config).await?;
+        let addr = listeners
+            .first()
+            .expect("bind_listeners always returns at least one listener")
+            .local_addr()?;
         tracing::info!("Arvik listening on http://{}", addr);
         Ok(Self {
-            listener,
+            listeners,
             addr,
             config,
         })
@@ -301,6 +307,8 @@ impl Server {
     {
         let mut signal = Box::pin(signal);
         let mut connections = JoinSet::new();
+        let mut accept_workers = spawn_accept_workers(self.listeners);
+        let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
 
         loop {
@@ -314,8 +322,12 @@ impl Server {
                 joined = connections.join_next(), if !connections.is_empty() => {
                     log_join_result(joined);
                 }
-                accepted = self.listener.accept() => {
-                    let (stream, peer_addr) = accepted?;
+                next = accepted.recv() => {
+                    let Some(next) = next else {
+                        break;
+                    };
+                    let (stream, peer_addr) = next?;
+                    apply_stream_options(&stream, &self.config)?;
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
                         drop(stream);
@@ -339,6 +351,10 @@ impl Server {
             }
         }
 
+        accept_workers.tasks.abort_all();
+        while let Some(joined) = accept_workers.tasks.join_next().await {
+            log_join_result(Some(joined));
+        }
         drain_connections(connections, shutdown_config).await;
         Ok(())
     }
@@ -356,6 +372,8 @@ impl Server {
     {
         let mut signal = Box::pin(signal);
         let mut connections = JoinSet::new();
+        let mut accept_workers = spawn_accept_workers(self.listeners);
+        let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
 
         loop {
@@ -369,8 +387,12 @@ impl Server {
                 joined = connections.join_next(), if !connections.is_empty() => {
                     log_join_result(joined);
                 }
-                accepted = self.listener.accept() => {
-                    let (stream, peer_addr) = accepted?;
+                next = accepted.recv() => {
+                    let Some(next) = next else {
+                        break;
+                    };
+                    let (stream, peer_addr) = next?;
+                    apply_stream_options(&stream, &self.config)?;
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
                         drop(stream);
@@ -399,6 +421,10 @@ impl Server {
             }
         }
 
+        accept_workers.tasks.abort_all();
+        while let Some(joined) = accept_workers.tasks.join_next().await {
+            log_join_result(Some(joined));
+        }
         drain_connections(connections, shutdown_config).await;
         Ok(())
     }
@@ -416,6 +442,8 @@ impl Server {
     {
         let mut signal = Box::pin(signal);
         let mut connections = JoinSet::new();
+        let mut accept_workers = spawn_accept_workers(self.listeners);
+        let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
 
         loop {
@@ -429,8 +457,12 @@ impl Server {
                 joined = connections.join_next(), if !connections.is_empty() => {
                     log_join_result(joined);
                 }
-                accepted = self.listener.accept() => {
-                    let (stream, peer_addr) = accepted?;
+                next = accepted.recv() => {
+                    let Some(next) = next else {
+                        break;
+                    };
+                    let (stream, peer_addr) = next?;
+                    apply_stream_options(&stream, &self.config)?;
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
                         drop(stream);
@@ -461,9 +493,150 @@ impl Server {
             }
         }
 
+        accept_workers.tasks.abort_all();
+        while let Some(joined) = accept_workers.tasks.join_next().await {
+            log_join_result(Some(joined));
+        }
         drain_connections(connections, shutdown_config).await;
         Ok(())
     }
+}
+
+async fn bind_listeners(addr: &str, config: &ServerConfig) -> Result<Vec<TcpListener>, BoxError> {
+    if config.accept_workers_count() > 1 && !config.reuse_port_enabled() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "accept_workers greater than 1 requires reuse_port(true)",
+        )
+        .into());
+    }
+
+    if !config.needs_tuned_listener() {
+        return Ok(vec![TcpListener::bind(addr).await?]);
+    }
+
+    let resolved = lookup_host(addr).await?.next().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "address resolved to no sockets",
+        )
+    })?;
+
+    if config.accept_workers_count() > 1 && resolved.port() == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "accept_workers greater than 1 requires an explicit non-zero port",
+        )
+        .into());
+    }
+
+    let mut listeners = Vec::with_capacity(config.accept_workers_count());
+    for _ in 0..config.accept_workers_count() {
+        listeners.push(bind_socket(resolved, config)?);
+    }
+    Ok(listeners)
+}
+
+fn bind_socket(addr: SocketAddr, config: &ServerConfig) -> io::Result<TcpListener> {
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, Some(Protocol::TCP))?;
+    socket.set_nonblocking(true)?;
+
+    if config.reuse_address_enabled() {
+        socket.set_reuse_address(true)?;
+    }
+
+    if config.reuse_port_enabled() {
+        set_reuse_port(&socket)?;
+    }
+
+    if let Some(size) = config.socket_recv_buffer_size_value() {
+        socket.set_recv_buffer_size(size)?;
+    }
+    if let Some(size) = config.socket_send_buffer_size_value() {
+        socket.set_send_buffer_size(size)?;
+    }
+
+    socket.bind(&addr.into())?;
+    socket.listen(config.backlog_size().unwrap_or(1024))?;
+
+    let std_listener: std::net::TcpListener = socket.into();
+    TcpListener::from_std(std_listener)
+}
+
+#[cfg(unix)]
+fn set_reuse_port(socket: &Socket) -> io::Result<()> {
+    socket.set_reuse_port(true)
+}
+
+#[cfg(not(unix))]
+fn set_reuse_port(_socket: &Socket) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "SO_REUSEPORT is not supported on this platform",
+    ))
+}
+
+struct AcceptWorkers {
+    receiver: mpsc::Receiver<io::Result<(TcpStream, SocketAddr)>>,
+    tasks: JoinSet<()>,
+}
+
+fn spawn_accept_workers(listeners: Vec<TcpListener>) -> AcceptWorkers {
+    let (sender, receiver) = mpsc::channel(1024);
+    let mut tasks = JoinSet::new();
+
+    for listener in listeners {
+        let sender = sender.clone();
+        tasks.spawn(async move {
+            loop {
+                let accepted = listener.accept().await;
+                if sender.send(accepted).await.is_err() {
+                    break;
+                }
+            }
+        });
+    }
+
+    drop(sender);
+    AcceptWorkers { receiver, tasks }
+}
+
+fn apply_stream_options(stream: &TcpStream, config: &ServerConfig) -> io::Result<()> {
+    if let Some(enabled) = config.tcp_nodelay_setting() {
+        stream.set_nodelay(enabled)?;
+    }
+
+    if config.tcp_keepalive_duration().is_some()
+        || config.tcp_keepalive_interval_duration().is_some()
+        || config.tcp_keepalive_retries_count().is_some()
+    {
+        let mut keepalive = TcpKeepalive::new();
+        if let Some(duration) = config.tcp_keepalive_duration() {
+            keepalive = keepalive.with_time(duration);
+        }
+        if let Some(interval) = config.tcp_keepalive_interval_duration() {
+            keepalive = keepalive.with_interval(interval);
+        }
+        if let Some(retries) = config.tcp_keepalive_retries_count() {
+            keepalive = with_keepalive_retries(keepalive, retries)?;
+        }
+        socket2::SockRef::from(stream).set_tcp_keepalive(&keepalive)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn with_keepalive_retries(keepalive: TcpKeepalive, retries: u32) -> io::Result<TcpKeepalive> {
+    Ok(keepalive.with_retries(retries))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn with_keepalive_retries(_keepalive: TcpKeepalive, _retries: u32) -> io::Result<TcpKeepalive> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "TCP keepalive retry tuning is not supported on this platform",
+    ))
 }
 
 fn try_admit_connection(config: &ServerConfig, active: &AtomicUsize, info: ConnectionInfo) -> bool {
@@ -658,5 +831,79 @@ impl tower_service::Service<Request> for MethodRouterService {
     fn call(&mut self, req: Request) -> Self::Future {
         let router = self.router.clone();
         Box::pin(async move { Ok(router.call(req, ()).await) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn default_bind_path_works() {
+        let Some(server) = bind_or_skip(Server::bind("127.0.0.1:0").await) else {
+            return;
+        };
+        assert_ne!(server.local_addr().port(), 0);
+        assert_eq!(server.config().accept_workers_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn tuned_bind_path_works() {
+        let config = ServerConfig::new()
+            .reuse_address(true)
+            .backlog(128)
+            .socket_recv_buffer_size(64 * 1024)
+            .socket_send_buffer_size(64 * 1024)
+            .tcp_nodelay(true);
+
+        let Some(server) = bind_or_skip(Server::bind_with_config("127.0.0.1:0", config).await)
+        else {
+            return;
+        };
+        assert_ne!(server.local_addr().port(), 0);
+    }
+
+    #[tokio::test]
+    async fn accept_workers_requires_reuse_port() {
+        let err =
+            match Server::bind_with_config("127.0.0.1:0", ServerConfig::new().accept_workers(2))
+                .await
+            {
+                Ok(_) => panic!("bind should reject accept_workers without reuse_port"),
+                Err(err) => err,
+            };
+
+        assert!(err.to_string().contains("requires reuse_port"));
+    }
+
+    #[tokio::test]
+    async fn accepted_stream_options_are_applied() {
+        let listener = match TcpListener::bind("127.0.0.1:0").await {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == io::ErrorKind::PermissionDenied => return,
+            Err(err) => panic!("bind failed: {err}"),
+        };
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr);
+        let accepted = listener.accept();
+        let (_client, accepted) = tokio::join!(client, accepted);
+        let (server, _) = accepted.unwrap();
+
+        apply_stream_options(&server, &ServerConfig::new().tcp_nodelay(true)).unwrap();
+        assert!(server.nodelay().unwrap());
+    }
+
+    fn bind_or_skip(result: Result<Server, BoxError>) -> Option<Server> {
+        match result {
+            Ok(server) => Some(server),
+            Err(err)
+                if err
+                    .downcast_ref::<io::Error>()
+                    .is_some_and(|err| err.kind() == io::ErrorKind::PermissionDenied) =>
+            {
+                None
+            }
+            Err(err) => panic!("bind failed: {err}"),
+        }
     }
 }

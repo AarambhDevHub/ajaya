@@ -12,6 +12,16 @@ use hyper_util::server::conn::auto::Builder;
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     max_connections: Option<usize>,
+    tcp_nodelay: Option<bool>,
+    tcp_keepalive: Option<Duration>,
+    tcp_keepalive_interval: Option<Duration>,
+    tcp_keepalive_retries: Option<u32>,
+    reuse_port: bool,
+    reuse_address: bool,
+    backlog: Option<i32>,
+    socket_recv_buffer_size: Option<usize>,
+    socket_send_buffer_size: Option<usize>,
+    accept_workers: usize,
     http1_keep_alive: bool,
     http1_half_close: bool,
     http1_title_case_headers: bool,
@@ -33,6 +43,16 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             max_connections: None,
+            tcp_nodelay: None,
+            tcp_keepalive: None,
+            tcp_keepalive_interval: None,
+            tcp_keepalive_retries: None,
+            reuse_port: false,
+            reuse_address: false,
+            backlog: None,
+            socket_recv_buffer_size: None,
+            socket_send_buffer_size: None,
+            accept_workers: 1,
             http1_keep_alive: true,
             http1_half_close: false,
             http1_title_case_headers: false,
@@ -58,6 +78,30 @@ impl ServerConfig {
         Self::default()
     }
 
+    /// Create a config tuned for low-latency HTTP/2 responses.
+    pub fn http2_low_latency() -> Self {
+        Self::default()
+            .http2_adaptive_window(true)
+            .http2_max_concurrent_streams(256)
+            .http2_max_send_buf_size(256 * 1024)
+            .http2_keep_alive_interval(Duration::from_secs(15))
+            .http2_keep_alive_timeout(Duration::from_secs(5))
+            .tcp_nodelay(true)
+    }
+
+    /// Create a config tuned for high-throughput HTTP/2 workloads.
+    pub fn http2_high_throughput() -> Self {
+        Self::default()
+            .http2_adaptive_window(true)
+            .http2_max_concurrent_streams(2_000)
+            .http2_initial_stream_window_size(1_048_576)
+            .http2_initial_connection_window_size(8_388_608)
+            .http2_max_send_buf_size(1_048_576)
+            .http2_keep_alive_interval(Duration::from_secs(20))
+            .http2_keep_alive_timeout(Duration::from_secs(10))
+            .tcp_nodelay(true)
+    }
+
     /// Set the maximum number of concurrently accepted connections.
     ///
     /// Connections accepted while this limit is reached are closed immediately.
@@ -79,6 +123,56 @@ impl ServerConfig {
         self.max_connections
     }
 
+    /// Return the configured TCP_NODELAY setting, if explicitly set.
+    pub fn tcp_nodelay_setting(&self) -> Option<bool> {
+        self.tcp_nodelay
+    }
+
+    /// Return the configured TCP keepalive idle duration.
+    pub fn tcp_keepalive_duration(&self) -> Option<Duration> {
+        self.tcp_keepalive
+    }
+
+    /// Return the configured TCP keepalive probe interval.
+    pub fn tcp_keepalive_interval_duration(&self) -> Option<Duration> {
+        self.tcp_keepalive_interval
+    }
+
+    /// Return the configured TCP keepalive retry count.
+    pub fn tcp_keepalive_retries_count(&self) -> Option<u32> {
+        self.tcp_keepalive_retries
+    }
+
+    /// Return whether SO_REUSEPORT is requested.
+    pub fn reuse_port_enabled(&self) -> bool {
+        self.reuse_port
+    }
+
+    /// Return whether SO_REUSEADDR is requested.
+    pub fn reuse_address_enabled(&self) -> bool {
+        self.reuse_address
+    }
+
+    /// Return the configured listen backlog.
+    pub fn backlog_size(&self) -> Option<i32> {
+        self.backlog
+    }
+
+    /// Return the configured receive buffer size.
+    pub fn socket_recv_buffer_size_value(&self) -> Option<usize> {
+        self.socket_recv_buffer_size
+    }
+
+    /// Return the configured send buffer size.
+    pub fn socket_send_buffer_size_value(&self) -> Option<usize> {
+        self.socket_send_buffer_size
+    }
+
+    /// Return the number of listener accept workers.
+    pub fn accept_workers_count(&self) -> usize {
+        self.accept_workers
+    }
+
     /// Return whether HTTP/1 keep-alive is enabled.
     pub fn http1_keep_alive_enabled(&self) -> bool {
         self.http1_keep_alive
@@ -92,6 +186,88 @@ impl ServerConfig {
     /// Return the HTTP/2 max concurrent streams setting.
     pub fn http2_max_concurrent_streams_limit(&self) -> Option<u32> {
         self.http2_max_concurrent_streams
+    }
+
+    /// Enable or disable TCP_NODELAY on accepted TCP sockets.
+    #[must_use]
+    pub fn tcp_nodelay(mut self, enabled: bool) -> Self {
+        self.tcp_nodelay = Some(enabled);
+        self
+    }
+
+    /// Set TCP keepalive idle duration on accepted TCP sockets.
+    #[must_use]
+    pub fn tcp_keepalive(mut self, duration: Duration) -> Self {
+        self.tcp_keepalive = Some(duration);
+        self
+    }
+
+    /// Set TCP keepalive probe interval on accepted TCP sockets.
+    #[must_use]
+    pub fn tcp_keepalive_interval(mut self, duration: Duration) -> Self {
+        self.tcp_keepalive_interval = Some(duration);
+        self
+    }
+
+    /// Set TCP keepalive retry count where the operating system supports it.
+    #[must_use]
+    pub fn tcp_keepalive_retries(mut self, retries: u32) -> Self {
+        self.tcp_keepalive_retries = Some(retries);
+        self
+    }
+
+    /// Enable or disable SO_REUSEPORT on listener sockets.
+    #[must_use]
+    pub fn reuse_port(mut self, enabled: bool) -> Self {
+        self.reuse_port = enabled;
+        self
+    }
+
+    /// Enable or disable SO_REUSEADDR on listener sockets.
+    #[must_use]
+    pub fn reuse_address(mut self, enabled: bool) -> Self {
+        self.reuse_address = enabled;
+        self
+    }
+
+    /// Set the listen backlog used by tuned listener sockets.
+    #[must_use]
+    pub fn backlog(mut self, backlog: i32) -> Self {
+        self.backlog = Some(backlog);
+        self
+    }
+
+    /// Set SO_RCVBUF on listener sockets.
+    #[must_use]
+    pub fn socket_recv_buffer_size(mut self, bytes: usize) -> Self {
+        self.socket_recv_buffer_size = Some(bytes);
+        self
+    }
+
+    /// Set SO_SNDBUF on listener sockets.
+    #[must_use]
+    pub fn socket_send_buffer_size(mut self, bytes: usize) -> Self {
+        self.socket_send_buffer_size = Some(bytes);
+        self
+    }
+
+    /// Set the number of listener accept workers.
+    ///
+    /// Values greater than one require [`ServerConfig::reuse_port`] to be
+    /// enabled so each worker owns its own listener socket.
+    #[must_use]
+    pub fn accept_workers(mut self, workers: usize) -> Self {
+        self.accept_workers = workers.max(1);
+        self
+    }
+
+    /// Set one accept worker per available CPU.
+    #[must_use]
+    pub fn accept_workers_per_cpu(self) -> Self {
+        let workers = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1);
+        self.accept_workers(workers)
     }
 
     /// Enable or disable HTTP/1 keep-alive.
@@ -223,6 +399,15 @@ impl ServerConfig {
         self.http2_only
     }
 
+    pub(crate) fn needs_tuned_listener(&self) -> bool {
+        self.reuse_port
+            || self.reuse_address
+            || self.backlog.is_some()
+            || self.socket_recv_buffer_size.is_some()
+            || self.socket_send_buffer_size.is_some()
+            || self.accept_workers > 1
+    }
+
     pub(crate) fn auto_builder(&self) -> Builder<TokioExecutor> {
         let mut builder = Builder::new(TokioExecutor::new());
 
@@ -281,5 +466,50 @@ mod tests {
             config.http2_keep_alive_interval,
             Some(Duration::from_secs(5))
         );
+    }
+
+    #[test]
+    fn builder_methods_store_socket_options() {
+        let config = ServerConfig::new()
+            .tcp_nodelay(true)
+            .tcp_keepalive(Duration::from_secs(60))
+            .tcp_keepalive_interval(Duration::from_secs(5))
+            .tcp_keepalive_retries(3)
+            .reuse_port(true)
+            .reuse_address(true)
+            .backlog(4096)
+            .socket_recv_buffer_size(256 * 1024)
+            .socket_send_buffer_size(512 * 1024)
+            .accept_workers(4);
+
+        assert_eq!(config.tcp_nodelay_setting(), Some(true));
+        assert_eq!(
+            config.tcp_keepalive_duration(),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(
+            config.tcp_keepalive_interval_duration(),
+            Some(Duration::from_secs(5))
+        );
+        assert_eq!(config.tcp_keepalive_retries_count(), Some(3));
+        assert!(config.reuse_port_enabled());
+        assert!(config.reuse_address_enabled());
+        assert_eq!(config.backlog_size(), Some(4096));
+        assert_eq!(config.socket_recv_buffer_size_value(), Some(256 * 1024));
+        assert_eq!(config.socket_send_buffer_size_value(), Some(512 * 1024));
+        assert_eq!(config.accept_workers_count(), 4);
+        assert!(config.needs_tuned_listener());
+    }
+
+    #[test]
+    fn http2_presets_store_expected_values() {
+        let low = ServerConfig::http2_low_latency();
+        assert_eq!(low.tcp_nodelay_setting(), Some(true));
+        assert_eq!(low.http2_max_concurrent_streams, Some(256));
+
+        let high = ServerConfig::http2_high_throughput();
+        assert_eq!(high.tcp_nodelay_setting(), Some(true));
+        assert_eq!(high.http2_max_concurrent_streams, Some(2_000));
+        assert_eq!(high.http2_initial_connection_window_size, Some(8_388_608));
     }
 }

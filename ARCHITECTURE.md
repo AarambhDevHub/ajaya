@@ -1396,38 +1396,30 @@ async fn create_user(ValidatedJson(body): ValidatedJson<CreateUser>) -> impl Int
 ## 23. Connection & Server Tuning
 
 ```rust
-// arvik-hyper/src/server.rs
+use std::time::Duration;
+use arvik::{RuntimeConfig, ServerConfig};
 
-Server::bind("0.0.0.0:8080")
-    // Socket options
-    .tcp_nodelay(true)                    // disable Nagle — lower latency
+let runtime = RuntimeConfig::new()
+    .worker_threads(std::thread::available_parallelism().map(usize::from).unwrap_or(1))
+    .max_blocking_threads(512)
+    .event_interval(61)
+    .global_queue_interval(61)
+    .max_io_events_per_tick(1024)
+    .build()?;
+
+let config = ServerConfig::http2_high_throughput()
+    .tcp_nodelay(true)
     .tcp_keepalive(Duration::from_secs(60))
     .tcp_keepalive_interval(Duration::from_secs(5))
     .tcp_keepalive_retries(3)
-    .reuse_port(true)                     // SO_REUSEPORT — multi-core accept
     .reuse_address(true)
     .backlog(4096)
+    .socket_recv_buffer_size(512 * 1024)
+    .socket_send_buffer_size(512 * 1024)
+    .max_connections(10_000);
 
-    // HTTP options
-    .http1_half_close(true)
-    .http1_title_case_headers(false)
-    .http2_only(false)
-    .http2_adaptive_window(true)          // adaptive flow control
-
-    // Worker threads
-    .worker_threads(num_cpus::get())
-    .max_blocking_threads(512)
-
-    // Connection limits
-    .max_connections(10_000)
-    .connection_timeout(Duration::from_secs(5))
-
-    // Graceful shutdown
-    .serve_with_graceful_shutdown(
-        app,
-        async { tokio::signal::ctrl_c().await.ok(); }
-    )
-    .await?;
+#[cfg(unix)]
+let config = config.reuse_port(true).accept_workers_per_cpu();
 ```
 
 ---
@@ -1499,17 +1491,17 @@ async fn handler(State(db): State<PgPool>) -> impl IntoResponse {
 ```
 Request arrives (TCP)
   ↓
-SO_REUSEPORT → per-CPU accept loop (no lock contention)
+SO_REUSEPORT → per-CPU accept workers when enabled
   ↓
-Hyper 1.x connection handler (async, zero-copy)
+Hyper 1.x connection handler (async, owns wire-level writes)
   ↓
 Radix trie router (O(log n), zero alloc, SmallVec params)
   ↓
 Handler dispatch (monomorphized, no dyn dispatch on hot path)
   ↓
-Extractor deserialization (direct from Bytes, no intermediate String)
+Extractor deserialization (direct from Bytes where body extraction permits)
   ↓
-Response serialization (direct to Bytes, zero-copy)
+Response serialization (BytesMut → Bytes, chunked bodies when useful)
   ↓
 Write to TCP socket
 ```
@@ -1518,24 +1510,31 @@ Write to TCP socket
 
 | Allocation | Strategy |
 |---|---|
-| Route params | `SmallVec<[(&str, &str); 8]>` — stack allocated for ≤ 8 params |
-| Request body | `bytes::Bytes` — ref-counted, zero-copy slicing |
+| Route params | `SmallVec` with interned names — stack allocated for ≤ 8 params |
+| Request body | `bytes::Bytes` — ref-counted, zero-copy slicing where collected |
 | Response body | `bytes::BytesMut` — growable, no-copy finalize |
 | Per-request extensions | `AHashMap` (faster than `HashMap` for small maps) |
-| String interning | Route patterns interned at startup |
+| String interning | Route patterns and param names interned at startup |
 
 ### 26.3 Tokio Tuning
 
 ```rust
-// Main runtime
-tokio::runtime::Builder::new_multi_thread()
-    .worker_threads(num_cpus::get())
+RuntimeConfig::new()
+    .worker_threads(std::thread::available_parallelism().map(usize::from).unwrap_or(1))
     .max_io_events_per_tick(1024)
     .event_interval(61)
     .global_queue_interval(61)
     .build()?
     .block_on(serve(app))
 ```
+
+`runtime-metrics` enables Tokio runtime metrics through `tokio-metrics`.
+The full Linux `io_uring` backend is deferred as future experimental work;
+0.9.x ships maintainable Tokio runtime tuning.
+
+HTTP/2 HPACK compression and connection coalescing remain Hyper/client-managed
+behavior. Arvik exposes presets for Hyper's supported flow-control,
+concurrency, keep-alive, frame, and buffer settings.
 
 ### 26.4 Benchmark Targets (TechEmpower Round 22 equivalent)
 

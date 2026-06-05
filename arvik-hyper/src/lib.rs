@@ -24,11 +24,15 @@
 
 pub mod config;
 pub mod graceful;
+pub mod runtime;
 pub mod serve;
 pub mod server;
 
 pub use config::ServerConfig;
 pub use graceful::{ConnectionInfo, ShutdownConfig, default_shutdown_signal};
+pub use runtime::RuntimeConfig;
+#[cfg(feature = "runtime-metrics")]
+pub use runtime::RuntimeMetricsHandle;
 pub use serve::{
     serve, serve_app, serve_handler_with_config, serve_handler_with_config_and_graceful_shutdown,
     serve_handler_with_graceful_shutdown, serve_router, serve_router_with_config,

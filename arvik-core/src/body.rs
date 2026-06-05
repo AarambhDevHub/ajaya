@@ -23,6 +23,8 @@
 //! let body = Body::from("Hello, Arvik!");
 //! ```
 
+use std::collections::VecDeque;
+use std::convert::Infallible;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -41,7 +43,16 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 ///
 /// `Body` implements [`http_body::Body`] so it integrates seamlessly
 /// with Hyper and Tower.
-pub struct Body(Pin<Box<dyn http_body::Body<Data = Bytes, Error = BoxError> + Send + 'static>>);
+pub struct Body {
+    kind: BodyKind,
+}
+
+enum BodyKind {
+    Empty(Empty<Bytes>),
+    Full(Full<Bytes>),
+    Chunks(ChunksBody),
+    Boxed(Pin<Box<dyn http_body::Body<Data = Bytes, Error = BoxError> + Send + 'static>>),
+}
 
 impl Body {
     /// Create a new `Body` from any type implementing `http_body::Body`.
@@ -50,17 +61,56 @@ impl Body {
         B: http_body::Body<Data = Bytes> + Send + Unpin + 'static,
         B::Error: Into<BoxError>,
     {
-        Self(Box::pin(MapErrorBody(body)))
+        Self {
+            kind: BodyKind::Boxed(Box::pin(MapErrorBody(body))),
+        }
     }
 
     /// Create an empty body (zero bytes).
     pub fn empty() -> Self {
-        Self::new(Empty::<Bytes>::new())
+        Self {
+            kind: BodyKind::Empty(Empty::<Bytes>::new()),
+        }
     }
 
     /// Create a body from raw bytes.
     pub fn from_bytes(b: Bytes) -> Self {
-        Self::new(Full::new(b))
+        Self {
+            kind: BodyKind::Full(Full::new(b)),
+        }
+    }
+
+    /// Create a body from static bytes without copying.
+    pub fn from_static(bytes: &'static [u8]) -> Self {
+        Self::from_bytes(Bytes::from_static(bytes))
+    }
+
+    /// Create a body from multiple byte chunks without concatenating them.
+    pub fn from_chunks<I, B>(chunks: I) -> Self
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<Bytes>,
+    {
+        let chunks: VecDeque<Bytes> = chunks
+            .into_iter()
+            .map(Into::into)
+            .filter(|chunk| !chunk.is_empty())
+            .collect();
+
+        if chunks.is_empty() {
+            return Self::empty();
+        }
+
+        let remaining = chunks.iter().map(Bytes::len).sum();
+        Self {
+            kind: BodyKind::Chunks(ChunksBody { chunks, remaining }),
+        }
+    }
+
+    /// Return true when the body's size hint proves it is empty.
+    pub fn is_empty_hint(&self) -> bool {
+        let hint = http_body::Body::size_hint(self);
+        hint.lower() == 0 && hint.upper() == Some(0)
     }
 
     /// Collect the entire body into [`Bytes`].
@@ -114,15 +164,30 @@ impl http_body::Body for Body {
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
-        Pin::new(&mut self.0).poll_frame(cx)
+        match &mut self.kind {
+            BodyKind::Empty(body) => poll_infallible(Pin::new(body).poll_frame(cx)),
+            BodyKind::Full(body) => poll_infallible(Pin::new(body).poll_frame(cx)),
+            BodyKind::Chunks(body) => Pin::new(body).poll_frame(cx),
+            BodyKind::Boxed(body) => body.as_mut().poll_frame(cx),
+        }
     }
 
     fn is_end_stream(&self) -> bool {
-        self.0.is_end_stream()
+        match &self.kind {
+            BodyKind::Empty(body) => body.is_end_stream(),
+            BodyKind::Full(body) => body.is_end_stream(),
+            BodyKind::Chunks(body) => body.is_end_stream(),
+            BodyKind::Boxed(body) => body.is_end_stream(),
+        }
     }
 
     fn size_hint(&self) -> http_body::SizeHint {
-        self.0.size_hint()
+        match &self.kind {
+            BodyKind::Empty(body) => body.size_hint(),
+            BodyKind::Full(body) => body.size_hint(),
+            BodyKind::Chunks(body) => body.size_hint(),
+            BodyKind::Boxed(body) => body.size_hint(),
+        }
     }
 }
 
@@ -141,6 +206,37 @@ impl std::fmt::Debug for Body {
 /// Internal adapter: wraps a stream as an `http_body::Body`.
 struct StreamBodyInner<S> {
     stream: S,
+}
+
+struct ChunksBody {
+    chunks: VecDeque<Bytes>,
+    remaining: usize,
+}
+
+impl http_body::Body for ChunksBody {
+    type Data = Bytes;
+    type Error = BoxError;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        let Some(chunk) = self.chunks.pop_front() else {
+            return Poll::Ready(None);
+        };
+        self.remaining = self.remaining.saturating_sub(chunk.len());
+        Poll::Ready(Some(Ok(Frame::data(chunk))))
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.chunks.is_empty()
+    }
+
+    fn size_hint(&self) -> http_body::SizeHint {
+        let mut hint = http_body::SizeHint::new();
+        hint.set_exact(self.remaining as u64);
+        hint
+    }
 }
 
 impl<S, E> http_body::Body for StreamBodyInner<S>
@@ -200,7 +296,20 @@ impl From<Vec<u8>> for Body {
 
 impl From<Full<Bytes>> for Body {
     fn from(full: Full<Bytes>) -> Self {
-        Self::new(full)
+        Self {
+            kind: BodyKind::Full(full),
+        }
+    }
+}
+
+fn poll_infallible(
+    poll: Poll<Option<Result<Frame<Bytes>, Infallible>>>,
+) -> Poll<Option<Result<Frame<Bytes>, BoxError>>> {
+    match poll {
+        Poll::Ready(Some(Ok(frame))) => Poll::Ready(Some(Ok(frame))),
+        Poll::Ready(Some(Err(err))) => match err {},
+        Poll::Ready(None) => Poll::Ready(None),
+        Poll::Pending => Poll::Pending,
     }
 }
 
@@ -237,5 +346,41 @@ where
 
     fn size_hint(&self) -> http_body::SizeHint {
         self.0.size_hint()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn empty_body_has_empty_hint() {
+        let body = Body::empty();
+        assert!(body.is_empty_hint());
+        assert_eq!(body.to_bytes().await.unwrap(), Bytes::new());
+    }
+
+    #[tokio::test]
+    async fn static_body_is_zero_copy_bytes() {
+        let body = Body::from_static(b"hello");
+        assert!(!body.is_empty_hint());
+        assert_eq!(body.to_bytes().await.unwrap(), Bytes::from_static(b"hello"));
+    }
+
+    #[tokio::test]
+    async fn chunked_body_preserves_chunk_contents() {
+        let body = Body::from_chunks([
+            Bytes::from_static(b"hello"),
+            Bytes::from_static(b" "),
+            Bytes::from_static(b"world"),
+        ]);
+
+        let hint = http_body::Body::size_hint(&body);
+        assert_eq!(hint.lower(), 11);
+        assert_eq!(hint.upper(), Some(11));
+        assert_eq!(
+            body.to_bytes().await.unwrap(),
+            Bytes::from_static(b"hello world")
+        );
     }
 }
