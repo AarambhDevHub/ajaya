@@ -385,15 +385,25 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
                     }
                     req.extensions_mut().insert(pp);
                 }
-                req.extensions_mut().insert(MatchedPathExt(pattern));
+                req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
-                self.routes[idx].1.call(req, state).await
+                let mut response = self.routes[idx].1.call(req, state).await;
+                response.extensions_mut().insert(MatchedPathExt(pattern));
+                response
             }
             Err(_) => {
                 if let Some(fb) = &self.fallback {
-                    return fb.clone_box().call(req, state).await;
+                    let mut response = fb.clone_box().call(req, state).await;
+                    response
+                        .extensions_mut()
+                        .insert(MatchedPathExt("__fallback".to_string()));
+                    return response;
                 }
-                not_found()
+                let mut response = not_found();
+                response
+                    .extensions_mut()
+                    .insert(MatchedPathExt("__unmatched".to_string()));
+                response
             }
         }
     }
@@ -469,9 +479,9 @@ impl RouterInner {
                     }
                     req.extensions_mut().insert(pp);
                 }
-                req.extensions_mut().insert(MatchedPathExt(pattern));
+                req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
-                if self.route_layers.is_empty() {
+                let mut response = if self.route_layers.is_empty() {
                     // ── Fast path: no route-level layers ─────────────────────
                     self.routes[idx].1.call(req, ()).await
                 } else {
@@ -480,13 +490,23 @@ impl RouterInner {
                     let base = BoxCloneService::new(MethodRouterService(mr));
                     let svc = apply_layers(base, &self.route_layers);
                     oneshot(svc, req).await
-                }
+                };
+                response.extensions_mut().insert(MatchedPathExt(pattern));
+                response
             }
             Err(_) => {
                 if let Some(fb) = &self.fallback {
-                    return fb.clone_box().call(req, ()).await;
+                    let mut response = fb.clone_box().call(req, ()).await;
+                    response
+                        .extensions_mut()
+                        .insert(MatchedPathExt("__fallback".to_string()));
+                    return response;
                 }
-                not_found()
+                let mut response = not_found();
+                response
+                    .extensions_mut()
+                    .insert(MatchedPathExt("__unmatched".to_string()));
+                response
             }
         }
     }
@@ -759,6 +779,31 @@ mod tests {
         );
         let res = app.call(req).await.unwrap();
         assert_eq!(res.into_body().to_string().await.unwrap(), "/");
+    }
+
+    #[tokio::test]
+    async fn matched_route_is_available_on_response_extensions() {
+        async fn h() -> &'static str {
+            "ok"
+        }
+
+        let mut app = Router::new()
+            .route("/users/{id}", crate::get(h))
+            .into_service();
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/users/42")
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        );
+
+        let res = app.call(req).await.unwrap();
+        assert_eq!(
+            res.extensions()
+                .get::<MatchedPathExt>()
+                .map(|matched| matched.0.as_str()),
+            Some("/users/{id}")
+        );
     }
 
     #[test]

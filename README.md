@@ -8,7 +8,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Version](https://img.shields.io/badge/version-0.7.5-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.8.2-green.svg)](CHANGELOG.md)
 [![Discord](https://img.shields.io/discord/placeholder?label=discord&logo=discord&logoColor=white)](https://discord.gg/HDth6PfCnp)
 
 </div>
@@ -21,7 +21,7 @@
 
 It is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**, designed to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
 
-> ⚡ **v0.7.5 — Test, Config, Shutdown** Arvik now ships proc macros, in-process test utilities, file/env configuration, and graceful shutdown. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
+> ⚡ **v0.8.2 — Observability** Arvik now ships Prometheus metrics, OpenTelemetry tracing, health probes, proc macros, in-process test utilities, file/env configuration, and graceful shutdown. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
 ---
 
@@ -40,7 +40,7 @@ Then in another terminal:
 
 ```bash
 curl http://localhost:8080/
-# => {"status":"healthy","framework":"Arvik","version":"0.7.5"}
+# => {"status":"healthy","framework":"Arvik","version":"0.8.2"}
 
 curl http://localhost:8080/users/42
 # => {"id":"42","name":"User from path param"}
@@ -99,6 +99,15 @@ cargo run --manifest-path examples/config_app/Cargo.toml
 
 # Graceful shutdown with connection hooks
 cargo run --manifest-path examples/graceful_shutdown/Cargo.toml
+
+# Prometheus metrics, requires metrics
+cargo run --manifest-path examples/metrics/Cargo.toml
+
+# OpenTelemetry tracing, requires opentelemetry
+cargo run --manifest-path examples/opentelemetry/Cargo.toml
+
+# Health, liveness, readiness, and startup endpoints, requires health
+cargo run --manifest-path examples/health_checks/Cargo.toml
 ```
 
 The TLS examples listen on `0.0.0.0:8443`; the plain HTTP examples listen on
@@ -107,7 +116,7 @@ stack, while rustls is the guaranteed HTTP/2 ALPN backend.
 
 ---
 
-## Features (v0.7.5)
+## Features (v0.8.2)
 
 ### ✅ Type-Safe Extractors
 
@@ -290,7 +299,7 @@ Full WebSocket support via `arvik-ws`, built on `tokio-tungstenite`. Auto-pong k
 >
 > ```toml
 > # Opt in to WebSocket
-> arvik = { version = "0.7", features = ["ws"] }
+> arvik = { version = "0.8", features = ["ws"] }
 > ```
 >
 > Default build (`arvik = "0.6"`) is HTTP-only — no WebSocket compiled in.
@@ -354,7 +363,7 @@ Full Server-Sent Events support via `arvik-sse`. Send real-time updates to the b
 > **SSE is opt-in.** Enable it by adding the `sse` feature to your `Cargo.toml`:
 >
 > ```toml
-> arvik = { version = "0.7", features = ["sse"] }
+> arvik = { version = "0.8", features = ["sse"] }
 > ```
 
 ```rust
@@ -387,7 +396,7 @@ let app = Router::new().route("/stream", get(json_stream));
 TLS support is opt-in. Rustls is the primary backend and provides the guaranteed HTTP/2 ALPN path.
 
 ```toml
-arvik = { version = "0.7", features = ["tls"] }
+arvik = { version = "0.8", features = ["tls"] }
 ```
 
 ```rust
@@ -405,7 +414,7 @@ serve_tls(app, "0.0.0.0:443", tls).await?;
 Hot reload uses the `tls-hot-reload` feature and debounces file changes. Failed reloads keep the previous config active, and existing connections continue using the session they already accepted.
 
 ```toml
-arvik = { version = "0.7", features = ["tls-hot-reload"] }
+arvik = { version = "0.8", features = ["tls-hot-reload"] }
 ```
 
 ```rust
@@ -416,7 +425,7 @@ let _watcher = tls.watch_pem_files("cert.pem", "key.pem", std::time::Duration::f
 Native TLS is available for platform TLS stacks. ALPN support is best-effort and platform-dependent; if HTTP/2 ALPN is not available, Arvik falls back cleanly to HTTP/1.1.
 
 ```toml
-arvik = { version = "0.7", features = ["native-tls"] }
+arvik = { version = "0.8", features = ["native-tls"] }
 ```
 
 HTTP/2 over cleartext is available for internal service-to-service traffic:
@@ -441,7 +450,7 @@ HTTP/2 server push promises are not implemented in Arvik Hyper mode because the 
 Filesystem static serving is opt-in with `static-files`.
 
 ```toml
-arvik = { version = "0.7", features = ["static-files"] }
+arvik = { version = "0.8", features = ["static-files"] }
 ```
 
 ```rust
@@ -466,7 +475,7 @@ let app = Router::new()
 Embedded static assets use `embedded-static` and `rust-embed`.
 
 ```toml
-arvik = { version = "0.7", features = ["embedded-static"] }
+arvik = { version = "0.8", features = ["embedded-static"] }
 ```
 
 ```rust
@@ -493,7 +502,7 @@ Static responses include MIME detection, `Last-Modified`, `ETag`, conditional `3
 Proc macros are opt-in with `macros`.
 
 ```toml
-arvik = { version = "0.7", features = ["macros"] }
+arvik = { version = "0.8", features = ["macros"] }
 ```
 
 ```rust
@@ -534,7 +543,7 @@ let app: Router<AppState> = Router::new()
 Test utilities are opt-in with `test-utils`.
 
 ```toml
-arvik = { version = "0.7", features = ["test-utils"] }
+arvik = { version = "0.8", features = ["test-utils"] }
 ```
 
 ```rust
@@ -555,7 +564,7 @@ HTTP requests run fully in-process with no port. `client.ws()` is available with
 File/env configuration is opt-in with `config`.
 
 ```toml
-arvik = { version = "0.7", features = ["config"] }
+arvik = { version = "0.8", features = ["config"] }
 ```
 
 ```rust
@@ -596,6 +605,29 @@ serve_with_config_and_graceful_shutdown(
 ).await?;
 ```
 
+### ✅ Observability
+
+Metrics, OpenTelemetry, and health checks are opt-in.
+
+```toml
+arvik = { version = "0.8", features = ["metrics", "opentelemetry", "health"] }
+```
+
+```rust
+use arvik::metrics::{PrometheusMetricsLayer, metrics_handler};
+use arvik::trace::OtelLayer;
+
+let app = arvik::Router::new()
+    .route("/metrics", arvik::get(metrics_handler))
+    .route("/health", arvik::get(arvik::health::health_handler))
+    .route("/health/live", arvik::get(arvik::health::liveness_handler))
+    .route("/health/ready", arvik::get(arvik::health::readiness_handler))
+    .layer(PrometheusMetricsLayer::new().service_name("api"))
+    .layer(OtelLayer::new("api"));
+```
+
+Prometheus labels use matched route patterns such as `/users/{id}`, not raw request paths. OpenTelemetry supports W3C TraceContext, B3, and Jaeger incoming propagation, with stdout and OTLP gRPC/HTTP exporter configuration.
+
 ---
 
 ## Workspace Structure
@@ -614,7 +646,8 @@ arvik/
 ├── arvik-tls/          # TLS via rustls + native-tls (v0.6.x ✅)
 ├── arvik-macros/       # Proc macros: #[debug_handler], #[route], #[handler] (v0.7.x ✅)
 ├── arvik-test/         # TestClient utilities (v0.7.x ✅)
-└── arvik-config/       # File/env configuration (v0.7.x ✅)
+├── arvik-config/       # File/env configuration (v0.7.x ✅)
+└── arvik-observe/      # Metrics, OpenTelemetry, and health checks (v0.8.x ✅)
 ```
 
 ---
@@ -645,7 +678,9 @@ See [ROADMAP.md](ROADMAP.md) for the complete version-by-version plan.
 | **0.7.3** | Test Client | ✅ Complete |
 | **0.7.4** | Configuration System | ✅ Complete |
 | **0.7.5** | Graceful Shutdown | ✅ Complete |
-| 0.8.x | Observability & Security | ⏳ Planned |
+| **0.8.0** | Prometheus Metrics | ✅ Complete |
+| **0.8.1** | OpenTelemetry Tracing | ✅ Complete |
+| **0.8.2** | Health Check Endpoints | ✅ Complete |
 | 0.9.x | Performance Sprint | ⏳ Planned |
 | 0.10.x | Stabilization & Docs | ⏳ Planned |
 

@@ -9,6 +9,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.8.2] — 2026-06-05 — Health Check Endpoints
+
+### Added
+
+- New opt-in `arvik-observe` crate with `health` support.
+- `HealthRegistry`, `HealthCheckResult`, and global `arvik::health::add_check`.
+- `/health`, `/health/live`, `/health/ready`, and `/health/startup` handlers.
+- Concurrent readiness checks with configurable per-check timeout.
+- `examples/health_checks`.
+
+### Changed
+
+- Workspace version bumped to `0.8.2`.
+
+---
+
+## [0.8.1] — 2026-06-05 — OpenTelemetry Tracing
+
+### Added
+
+- `opentelemetry` facade feature and `arvik::trace` module.
+- `OtelLayer::new(service_name)` for HTTP request spans.
+- W3C TraceContext, B3, and Jaeger incoming propagation support.
+- `OtelConfig` for stdout and OTLP gRPC/HTTP exporter setup.
+- Span attributes for HTTP method, URL, matched route, status, and user agent.
+- `examples/opentelemetry`.
+
+---
+
+## [0.8.0] — 2026-06-05 — Prometheus Metrics
+
+### Added
+
+- `metrics` facade feature and `arvik::metrics` module.
+- `PrometheusMetricsLayer` and `MetricsRegistry`.
+- Prometheus scrape handlers through `metrics_handler` and `metrics_handler_with_registry`.
+- Request count, duration, in-flight, request body size, and response body size metrics.
+- Matched-route labels that use patterns like `/users/{id}` instead of raw paths.
+- Router responses now carry matched route metadata for outer middleware.
+- `examples/metrics`.
+
+---
+
 ## [0.7.5] — 2026-06-05 — Graceful Shutdown
 
 ### Added

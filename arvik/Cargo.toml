@@ -20,6 +20,7 @@ arvik-static  = { workspace = true, optional = true, default-features = false }
 arvik-macros  = { workspace = true, optional = true }
 arvik-test    = { workspace = true, optional = true }
 arvik-config  = { workspace = true, optional = true }
+arvik-observe = { workspace = true, optional = true, default-features = false }
 arvik-ws      = { workspace = true, optional = true }
 arvik-sse        = { workspace = true, optional = true }
 tokio         = { workspace = true }
@@ -51,6 +52,10 @@ config = ["dep:arvik-config"]
 config-hot-reload = ["config", "arvik-config/hot-reload"]
 ws = ["dep:arvik-ws", "arvik-test?/ws"]
 sse = ["dep:arvik-sse"]
+metrics = ["dep:arvik-observe", "arvik-observe/metrics"]
+opentelemetry = ["dep:arvik-observe", "arvik-observe/opentelemetry"]
+health = ["dep:arvik-observe", "arvik-observe/health"]
+observability = ["metrics", "opentelemetry", "health"]
 
 [dev-dependencies]
 trybuild = { workspace = true }
