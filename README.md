@@ -778,6 +778,10 @@ benchmark suite lives in `examples/benchmarks` and can be run locally with
 open-file limits, and background load; the manual GitHub benchmark workflow is
 a smoke/artifact workflow, not a release-grade performance claim.
 
+The HTTP/1.1 benchmark endpoints use `wrk` and `hey`. The h2c endpoint is
+HTTP/2 prior-knowledge only and uses `h2load` from `nghttp2-client`; it is
+skipped locally if `h2load` is not installed.
+
 Historical simple TCP path routing numbers (`wrk -t4 -c100 -d10s`, release
 mode, same hardware):
 
