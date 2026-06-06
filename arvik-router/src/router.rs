@@ -20,7 +20,7 @@
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use arvik_core::handler::ErasedHandler;
@@ -458,13 +458,32 @@ impl Router<()> {
     pub fn into_service(self) -> BoxCloneService {
         let route_layers = self.route_layers;
         let outer_layers = self.layers;
+        let routes = self
+            .routes
+            .into_iter()
+            .map(|entry| {
+                let route_service = if route_layers.is_empty() {
+                    None
+                } else {
+                    let base =
+                        BoxCloneService::new(MethodRouterService(entry.method_router.clone()));
+                    Some(Arc::new(Mutex::new(apply_layers(base, &route_layers))))
+                };
+
+                CompiledRouteEntry {
+                    pattern: entry.pattern,
+                    method_router: entry.method_router,
+                    param_names: entry.param_names,
+                    route_service,
+                }
+            })
+            .collect();
 
         // Inner core: route dispatch + route_layers
         let inner = Arc::new(RouterInner {
             trie: self.trie,
-            routes: self.routes,
+            routes,
             fallback: self.fallback,
-            route_layers,
         });
 
         // Wrap in a clone-friendly Tower service
@@ -487,9 +506,15 @@ impl<S: Clone + Send + Sync + 'static> Default for Router<S> {
 
 struct RouterInner {
     trie: matchit::Router<usize>,
-    routes: Vec<RouteEntry<()>>,
+    routes: Vec<CompiledRouteEntry>,
     fallback: Option<Box<dyn ErasedHandler<()>>>,
-    route_layers: Vec<LayerFn>,
+}
+
+struct CompiledRouteEntry {
+    pattern: Arc<str>,
+    method_router: MethodRouter<()>,
+    param_names: Arc<[Arc<str>]>,
+    route_service: Option<Arc<Mutex<BoxCloneService>>>,
 }
 
 impl RouterInner {
@@ -516,13 +541,12 @@ impl RouterInner {
                 }
                 req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
-                let mut response = if self.route_layers.is_empty() {
-                    entry.method_router.call(req, ()).await
-                } else {
-                    let base =
-                        BoxCloneService::new(MethodRouterService(entry.method_router.clone()));
-                    let svc = apply_layers(base, &self.route_layers);
-                    oneshot(svc, req).await
+                let mut response = match &entry.route_service {
+                    Some(service) => {
+                        let service = service.lock().expect("route service lock poisoned").clone();
+                        oneshot(service, req).await
+                    }
+                    None => entry.method_router.call(req, ()).await,
                 };
                 response.extensions_mut().insert(MatchedPathExt(pattern));
                 response

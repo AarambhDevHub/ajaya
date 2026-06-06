@@ -45,7 +45,7 @@
 //! ```
 
 use bytes::{BufMut, Bytes, BytesMut};
-use http::{HeaderMap, StatusCode};
+use http::{HeaderMap, HeaderValue, StatusCode, header};
 use http_body_util::BodyExt as _;
 
 use crate::body::{Body, BoxError};
@@ -143,7 +143,9 @@ impl IntoResponse for Response {
 impl IntoResponse for StatusCode {
     #[inline]
     fn into_response(self) -> Response {
-        ResponseBuilder::new().status(self).empty()
+        let mut response = Response::new(Body::empty());
+        *response.status_mut() = self;
+        response
     }
 }
 
@@ -153,17 +155,13 @@ impl IntoResponse for StatusCode {
 
 impl IntoResponse for String {
     fn into_response(self) -> Response {
-        ResponseBuilder::new()
-            .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-            .body(Body::from(self))
+        text_response(Body::from(self))
     }
 }
 
 impl IntoResponse for &'static str {
     fn into_response(self) -> Response {
-        ResponseBuilder::new()
-            .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-            .body(Body::from(self))
+        text_response(Body::from_static(self.as_bytes()))
     }
 }
 
@@ -173,9 +171,12 @@ impl IntoResponse for &'static str {
 
 impl IntoResponse for Bytes {
     fn into_response(self) -> Response {
-        ResponseBuilder::new()
-            .header(http::header::CONTENT_TYPE, "application/octet-stream")
-            .body(Body::from(self))
+        let mut response = Response::new(Body::from_bytes(self));
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/octet-stream"),
+        );
+        response
     }
 }
 
@@ -319,6 +320,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use super::*;
 
@@ -368,6 +370,44 @@ mod tests {
             response.into_body().to_bytes().await.unwrap(),
             Bytes::from_static(br#"{"error":"Serialization failed","code":500}"#)
         );
+    }
+
+    #[tokio::test]
+    async fn static_str_response_sets_text_headers_and_body() {
+        let response = "Hello".into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(http::header::CONTENT_TYPE).unwrap(),
+            "text/plain; charset=utf-8"
+        );
+        let hint = http_body::Body::size_hint(response.body());
+        assert_eq!(hint.lower(), 5);
+        assert_eq!(hint.upper(), Some(5));
+        assert_eq!(
+            response.into_body().to_bytes().await.unwrap(),
+            Bytes::from_static(b"Hello")
+        );
+    }
+
+    #[tokio::test]
+    async fn bytes_response_sets_octet_stream() {
+        let response = Bytes::from_static(b"abc").into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(http::header::CONTENT_TYPE).unwrap(),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            response.into_body().to_bytes().await.unwrap(),
+            Bytes::from_static(b"abc")
+        );
+    }
+
+    #[tokio::test]
+    async fn status_code_response_is_empty() {
+        let response = StatusCode::NO_CONTENT.into_response();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert!(response.into_body().to_bytes().await.unwrap().is_empty());
     }
 }
 
@@ -451,15 +491,14 @@ impl<T: serde::Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
         let mut writer = BytesMut::with_capacity(128).writer();
         match serde_json::to_writer(&mut writer, &self.0) {
-            Ok(()) => ResponseBuilder::new()
-                .header(http::header::CONTENT_TYPE, "application/json")
-                .body(Body::from_bytes(writer.into_inner().freeze())),
+            Ok(()) => json_response(Body::from_bytes(writer.into_inner().freeze())),
             Err(err) => {
                 tracing::error!("JSON serialization failed: {err}");
-                ResponseBuilder::new()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header(http::header::CONTENT_TYPE, "application/json")
-                    .body(Body::from(r#"{"error":"Serialization failed","code":500}"#))
+                let mut response = json_response(Body::from_static(
+                    br#"{"error":"Serialization failed","code":500}"#,
+                ));
+                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                response
             }
         }
     }
@@ -489,4 +528,24 @@ impl<T: Into<String>> IntoResponse for Html<T> {
             .header(http::header::CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(self.0.into()))
     }
+}
+
+#[inline]
+fn text_response(body: Body) -> Response {
+    let mut response = Response::new(body);
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    response
+}
+
+#[inline]
+fn json_response(body: Body) -> Response {
+    let mut response = Response::new(body);
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    response
 }

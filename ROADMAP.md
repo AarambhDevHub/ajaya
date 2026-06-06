@@ -832,7 +832,7 @@
 - [x] Comparison baseline manifests: Axum 0.8, Actix-web 4
 - [x] Platform guidance documents `SO_REUSEPORT` and local machine variance
 
-**Deliverable:** Numbers in README. Arvik beats Actix on plaintext + JSON.
+**Deliverable:** Repeatable benchmark artifacts with raw outputs and summaries.
 
 ---
 

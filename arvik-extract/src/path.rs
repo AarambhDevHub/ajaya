@@ -62,12 +62,7 @@ where
             .get::<PathParams>()
             .ok_or(PathRejection::MissingPathParams)?;
 
-        let pairs: Vec<(String, String)> = path_params
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
-
-        let deserializer = PathDeserializer::new(&pairs);
+        let deserializer = PathDeserializer::new(path_params);
         let value = T::deserialize(deserializer)
             .map_err(|e| PathRejection::DeserializationFailed(e.into_message()))?;
 

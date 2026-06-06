@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `PLAN_PERFORMANCE.md` and `BENCHMARKS.md` for performance findings,
+  benchmark workflow guidance, and benchmark validation rules.
+- Keep-alive `ab` benchmark wrapper and repeated benchmark summaries with
+  median, min, and max RPS.
+- Default small-file byte caching for filesystem `ServeDir` and `ServeFile`,
+  with cache limit and disable controls.
+
+### Changed
+
+- Optimized simple response construction, JSON response construction, typed
+  path parameter extraction, route-layer dispatch, request ID propagation,
+  security header injection, compression skip paths, and static file serving.
+- Split the middleware benchmark into focused scenarios for no middleware,
+  request ID, headers, tracing, CORS, rate limit, compression, and full stack.
+- Updated benchmark documentation and public performance wording to describe
+  performance improvements and benchmark validation without competitive claims.
+
 ### Fixed
 
 - Hardened benchmark scripts and workflow after the first manual Actions run:

@@ -1,8 +1,8 @@
 # Arvik — Full Architecture & Feature Specification
 
 > *Fast, Typed, and Fearless Web Framework for Rust*
-> Built on Tokio + Hyper. Engineered to beat Actix-web in benchmarks.
-> Every feature Axum and Actix-web have — unified under one ergonomic API.
+> Built on Tokio + Hyper with typed routing, middleware, observability,
+> static files, TLS, HTTP/2, and benchmark validation.
 
 ---
 
@@ -1536,22 +1536,27 @@ HTTP/2 HPACK compression and connection coalescing remain Hyper/client-managed
 behavior. Arvik exposes presets for Hyper's supported flow-control,
 concurrency, keep-alive, frame, and buffer settings.
 
-### 26.4 Benchmark Targets (TechEmpower Round 22 equivalent)
+### 26.4 Benchmark Validation Targets
 
 The benchmark suite keeps HTTP/1.1 and HTTP/2 h2c modes separate. HTTP/1.1
-targets start normal `serve` benchmark servers and run `wrk` plus `hey`.
+targets start normal `serve` benchmark servers and run `wrk`, `hey`, and
+`ab -k`.
 HTTP/2 h2c targets start the dedicated `serve_h2c` benchmark server and run
 `h2load` only after an h2load readiness probe succeeds. Smoke output and failed
 zero-start h2load runs are validation artifacts, not published benchmark
 numbers.
 
-| Test | Target | Actix-web |
-|---|---|---|
-| Plaintext | 800K req/sec | 600K req/sec |
-| JSON | 500K req/sec | 380K req/sec |
-| Single query (Postgres) | 200K req/sec | 150K req/sec |
-| Multiple queries | 30K req/sec | 22K req/sec |
-| Fortunes (template) | 150K req/sec | 120K req/sec |
+Measured scenarios:
+
+- plaintext
+- JSON
+- path parameters
+- middleware split by layer
+- static files
+- h2c plaintext
+
+Manual artifacts report median, min, and max RPS across repeated runs, plus
+latency fields where each tool provides them.
 
 ---
 

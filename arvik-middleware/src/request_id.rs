@@ -114,23 +114,29 @@ where
     }
 
     fn call(&mut self, mut req: Request) -> Self::Future {
-        // Reuse incoming ID or generate new one
-        let request_id = req
-            .headers()
-            .get(X_REQUEST_ID)
-            .and_then(|v| v.to_str().ok())
-            .map(RequestId::from_string)
-            .unwrap_or_else(RequestId::new);
+        // Reuse an incoming valid request ID, otherwise generate a UUID v4.
+        let incoming = req.headers().get(X_REQUEST_ID).and_then(|value| {
+            value
+                .to_str()
+                .ok()
+                .map(|id| (RequestId::from_string(id), value.clone()))
+        });
 
-        let id_str = request_id.0.clone();
+        let (request_id, header_value) = match incoming {
+            Some(incoming) => incoming,
+            None => {
+                let request_id = RequestId::new();
+                let header_value =
+                    HeaderValue::from_str(request_id.as_str()).expect("UUID is a valid header");
+                (request_id, header_value)
+            }
+        };
 
         // Insert as extension so handlers can access it
         req.extensions_mut().insert(request_id);
 
         // Also set on request headers for downstream middleware
-        if let Ok(val) = HeaderValue::from_str(&id_str) {
-            req.headers_mut().insert(X_REQUEST_ID, val);
-        }
+        req.headers_mut().insert(X_REQUEST_ID, header_value.clone());
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
@@ -139,9 +145,7 @@ where
             let mut response = inner.call(req).await?;
 
             // Propagate the request ID to the response
-            if let Ok(val) = HeaderValue::from_str(&id_str) {
-                response.headers_mut().insert(X_REQUEST_ID, val);
-            }
+            response.headers_mut().insert(X_REQUEST_ID, header_value);
 
             Ok(response)
         })
@@ -206,5 +210,64 @@ where
 
             Ok(response)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arvik_core::{Body, ResponseBuilder};
+    use std::future::{Ready, ready};
+
+    #[derive(Clone)]
+    struct EchoRequestIdService;
+
+    impl Service<Request> for EchoRequestIdService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = Ready<Result<Response, Infallible>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: Request) -> Self::Future {
+            let id = req
+                .extensions()
+                .get::<RequestId>()
+                .map(RequestId::as_str)
+                .unwrap_or("")
+                .to_string();
+            ready(Ok(ResponseBuilder::new().body(Body::from(id))))
+        }
+    }
+
+    #[tokio::test]
+    async fn request_id_reuses_incoming_header_and_propagates_response() {
+        let mut service = RequestIdLayer::new().layer(EchoRequestIdService);
+        let req = Request::new(
+            http::Request::builder()
+                .header(X_REQUEST_ID, "incoming-id")
+                .body(Body::empty())
+                .unwrap(),
+        );
+
+        let response = service.call(req).await.unwrap();
+        assert_eq!(response.headers()[X_REQUEST_ID], "incoming-id");
+        assert_eq!(
+            response.into_body().to_bytes().await.unwrap().as_ref(),
+            b"incoming-id"
+        );
+    }
+
+    #[tokio::test]
+    async fn request_id_generates_when_missing() {
+        let mut service = RequestIdLayer::new().layer(EchoRequestIdService);
+        let req = Request::new(http::Request::builder().body(Body::empty()).unwrap());
+
+        let response = service.call(req).await.unwrap();
+        assert!(response.headers().contains_key(X_REQUEST_ID));
+        let body = response.into_body().to_bytes().await.unwrap();
+        assert!(!body.is_empty());
     }
 }

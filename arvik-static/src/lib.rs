@@ -5,6 +5,8 @@
 //! assets from the binary with the same cache, range, and content negotiation
 //! behavior.
 
+#[cfg(feature = "fs")]
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
 #[cfg(feature = "embed")]
@@ -12,19 +14,22 @@ use std::marker::PhantomData;
 use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
+#[cfg(feature = "fs")]
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 #[cfg(feature = "embed")]
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use arvik_core::{Body, OriginalUri, Request, Response, ResponseBuilder};
-#[cfg(feature = "embed")]
 use bytes::Bytes;
 use http::{HeaderValue, Method, StatusCode, Uri, header};
 use percent_encoding::percent_decode_str;
 use tower_service::Service;
 
 const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
+#[cfg(feature = "fs")]
+const DEFAULT_SMALL_FILE_CACHE_LIMIT: usize = 64 * 1024;
 const INDEX_FILE: &str = "index.html";
 
 type BoxFutureResponse = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send>>;
@@ -42,6 +47,8 @@ pub struct ServeDir {
     directory_listing: bool,
     chunk_size: usize,
     cache_control: Option<HeaderValue>,
+    small_file_cache_limit: Option<usize>,
+    file_cache: Arc<FileCache>,
 }
 
 #[cfg(feature = "fs")]
@@ -58,6 +65,8 @@ impl ServeDir {
             directory_listing: false,
             chunk_size: DEFAULT_CHUNK_SIZE,
             cache_control: None,
+            small_file_cache_limit: Some(DEFAULT_SMALL_FILE_CACHE_LIMIT),
+            file_cache: Arc::new(FileCache::default()),
         }
     }
 
@@ -123,6 +132,21 @@ impl ServeDir {
         self
     }
 
+    /// Cache filesystem file bytes up to `bytes` after metadata validation.
+    ///
+    /// The cache is keyed by the selected on-disk file, so plain, `.gz`, and
+    /// `.br` variants are cached independently.
+    pub fn small_file_cache_limit(mut self, bytes: usize) -> Self {
+        self.small_file_cache_limit = Some(bytes);
+        self
+    }
+
+    /// Disable filesystem byte caching while preserving metadata validation.
+    pub fn disable_file_cache(mut self) -> Self {
+        self.small_file_cache_limit = None;
+        self
+    }
+
     async fn handle(self, req: Request) -> Response {
         if !is_get_or_head(req.method()) {
             return if self.call_fallback_on_method_not_allowed {
@@ -156,7 +180,16 @@ impl ServeDir {
             .await
         {
             Ok(asset) => {
-                serve_fs_asset(asset, req, head, self.chunk_size, self.cache_control).await
+                serve_fs_asset(
+                    asset,
+                    req,
+                    head,
+                    self.chunk_size,
+                    self.cache_control,
+                    Arc::clone(&self.file_cache),
+                    self.small_file_cache_limit,
+                )
+                .await
             }
             Err(()) => self.call_fallback(req).await,
         }
@@ -196,6 +229,8 @@ impl ServeDir {
                             false,
                             self.chunk_size,
                             self.cache_control.clone(),
+                            Arc::clone(&self.file_cache),
+                            self.small_file_cache_limit,
                         )
                         .await
                     }
@@ -297,6 +332,8 @@ pub struct ServeFile {
     precompressed_br: bool,
     chunk_size: usize,
     cache_control: Option<HeaderValue>,
+    small_file_cache_limit: Option<usize>,
+    file_cache: Arc<FileCache>,
 }
 
 #[cfg(feature = "fs")]
@@ -312,6 +349,8 @@ impl ServeFile {
             precompressed_br: false,
             chunk_size: DEFAULT_CHUNK_SIZE,
             cache_control: None,
+            small_file_cache_limit: Some(DEFAULT_SMALL_FILE_CACHE_LIMIT),
+            file_cache: Arc::new(FileCache::default()),
         }
     }
 
@@ -324,6 +363,8 @@ impl ServeFile {
             precompressed_br: false,
             chunk_size: DEFAULT_CHUNK_SIZE,
             cache_control: None,
+            small_file_cache_limit: Some(DEFAULT_SMALL_FILE_CACHE_LIMIT),
+            file_cache: Arc::new(FileCache::default()),
         }
     }
 
@@ -357,6 +398,18 @@ impl ServeFile {
         self
     }
 
+    /// Cache filesystem file bytes up to `bytes` after metadata validation.
+    pub fn small_file_cache_limit(mut self, bytes: usize) -> Self {
+        self.small_file_cache_limit = Some(bytes);
+        self
+    }
+
+    /// Disable filesystem byte caching while preserving metadata validation.
+    pub fn disable_file_cache(mut self) -> Self {
+        self.small_file_cache_limit = None;
+        self
+    }
+
     async fn handle(self, req: Request) -> Response {
         if !is_get_or_head(req.method()) {
             return method_not_allowed();
@@ -368,7 +421,16 @@ impl ServeFile {
 
         match self.select_file(accepts_br, accepts_gzip).await {
             Ok(asset) => {
-                serve_fs_asset(asset, req, head, self.chunk_size, self.cache_control).await
+                serve_fs_asset(
+                    asset,
+                    req,
+                    head,
+                    self.chunk_size,
+                    self.cache_control,
+                    Arc::clone(&self.file_cache),
+                    self.small_file_cache_limit,
+                )
+                .await
             }
             Err(()) => not_found(),
         }
@@ -720,6 +782,49 @@ async fn call_boxed(mut service: BoxCloneService, req: Request) -> Response {
 }
 
 #[cfg(feature = "fs")]
+#[derive(Default)]
+struct FileCache {
+    entries: Mutex<HashMap<PathBuf, CachedFile>>,
+}
+
+#[cfg(feature = "fs")]
+struct CachedFile {
+    len: u64,
+    modified: Option<SystemTime>,
+    bytes: Bytes,
+}
+
+#[cfg(feature = "fs")]
+impl FileCache {
+    fn get_fresh(&self, path: &Path, len: u64, modified: Option<SystemTime>) -> Option<Bytes> {
+        let mut entries = self.entries.lock().ok()?;
+        let fresh = entries
+            .get(path)
+            .is_some_and(|entry| entry.len == len && entry.modified == modified);
+
+        if fresh {
+            return entries.get(path).map(|entry| entry.bytes.clone());
+        }
+
+        entries.remove(path);
+        None
+    }
+
+    fn store(&self, path: PathBuf, len: u64, modified: Option<SystemTime>, bytes: Bytes) {
+        if let Ok(mut entries) = self.entries.lock() {
+            entries.insert(
+                path,
+                CachedFile {
+                    len,
+                    modified,
+                    bytes,
+                },
+            );
+        }
+    }
+}
+
+#[cfg(feature = "fs")]
 struct FsAsset {
     path: PathBuf,
     len: u64,
@@ -760,6 +865,8 @@ async fn serve_fs_asset(
     head: bool,
     chunk_size: usize,
     cache_control: Option<HeaderValue>,
+    file_cache: Arc<FileCache>,
+    small_file_cache_limit: Option<usize>,
 ) -> Response {
     if is_not_modified(&req, &asset.etag, asset.modified) {
         return not_modified(
@@ -815,6 +922,24 @@ async fn serve_fs_asset(
         return builder.empty();
     }
 
+    if let Some(limit) = small_file_cache_limit
+        && asset.len <= limit as u64
+    {
+        if let Some(bytes) = file_cache.get_fresh(&asset.path, asset.len, asset.modified) {
+            return builder.body(cached_file_body(bytes, range));
+        }
+
+        let bytes = match tokio::fs::read(&asset.path).await {
+            Ok(bytes) => Bytes::from(bytes),
+            Err(_) => return not_found(),
+        };
+        if bytes.len() as u64 == asset.len {
+            file_cache.store(asset.path.clone(), asset.len, asset.modified, bytes.clone());
+        }
+
+        return builder.body(cached_file_body(bytes, range));
+    }
+
     let file = match tokio::fs::File::open(&asset.path).await {
         Ok(file) => file,
         Err(_) => return not_found(),
@@ -826,6 +951,14 @@ async fn serve_fs_asset(
     };
 
     builder.body(body)
+}
+
+#[cfg(feature = "fs")]
+fn cached_file_body(bytes: Bytes, range: Option<ByteRange>) -> Body {
+    match range {
+        Some(range) => Body::from_bytes(bytes.slice(range.start as usize..range.end as usize + 1)),
+        None => Body::from_bytes(bytes),
+    }
 }
 
 #[cfg(feature = "fs")]
@@ -1491,6 +1624,62 @@ mod tests {
             service.call(req).await.unwrap().status(),
             StatusCode::RANGE_NOT_SATISFIABLE
         );
+    }
+
+    #[cfg(feature = "fs")]
+    #[tokio::test]
+    async fn small_file_cache_fills_and_serves_ranges() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.txt");
+        write(&path, b"abcdef");
+
+        let mut service = ServeFile::new(&path).small_file_cache_limit(64);
+        let res = service.call(request("/ignored")).await.unwrap();
+        assert_eq!(body_text(res).await, "abcdef");
+        assert_eq!(service.file_cache.entries.lock().unwrap().len(), 1);
+
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/ignored")
+                .header(header::RANGE, "bytes=1-3")
+                .body(Body::empty())
+                .unwrap(),
+        );
+        let res = service.call(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body_text(res).await, "bcd");
+    }
+
+    #[cfg(feature = "fs")]
+    #[tokio::test]
+    async fn small_file_cache_revalidates_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.txt");
+        write(&path, b"one");
+
+        let mut service = ServeFile::new(&path).small_file_cache_limit(64);
+        let res = service.call(request("/ignored")).await.unwrap();
+        assert_eq!(body_text(res).await, "one");
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        write(&path, b"two");
+
+        let res = service.call(request("/ignored")).await.unwrap();
+        assert_eq!(body_text(res).await, "two");
+        assert_eq!(service.file_cache.entries.lock().unwrap().len(), 1);
+    }
+
+    #[cfg(feature = "fs")]
+    #[tokio::test]
+    async fn file_cache_can_be_disabled() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.txt");
+        write(&path, b"abcdef");
+
+        let mut service = ServeFile::new(&path).disable_file_cache();
+        let res = service.call(request("/ignored")).await.unwrap();
+        assert_eq!(body_text(res).await, "abcdef");
+        assert_eq!(service.file_cache.entries.lock().unwrap().len(), 0);
     }
 
     #[cfg(feature = "fs")]

@@ -1,7 +1,7 @@
 //! # Arvik — Fast, Typed, and Fearless Web Framework for Rust
 //!
 //! Arvik is a high-performance web framework built on Tokio and Hyper,
-//! engineered to be the fastest and most ergonomic Rust web framework.
+//! with typed routing, extractors, middleware, observability, and deployment APIs.
 //!
 //! ## Quick Start
 //!

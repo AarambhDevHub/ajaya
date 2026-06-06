@@ -44,22 +44,28 @@ jobs:
       - name: Install benchmark tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y wrk golang-go nghttp2-client
+          sudo apt-get install -y wrk golang-go nghttp2-client apache2-utils
           go install github.com/rakyll/hey@latest
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
 
       - name: Configure benchmark profile
         run: |
           if [ "${{ inputs.profile }}" = "smoke" ]; then
-            duration="5s"
+            duration="10s"
+            runs="1"
           else
             duration="${{ inputs.duration }}"
+            runs="3"
           fi
 
+          echo "BENCH_PROFILE=${{ inputs.profile }}" >> "$GITHUB_ENV"
+          echo "BENCH_RUNS=$runs" >> "$GITHUB_ENV"
           echo "WRK_DURATION=$duration" >> "$GITHUB_ENV"
           echo "HEY_DURATION=$duration" >> "$GITHUB_ENV"
           echo "H2LOAD_DURATION=$duration" >> "$GITHUB_ENV"
           echo "H2LOAD_REQUESTS=${{ inputs.h2load_requests }}" >> "$GITHUB_ENV"
+          echo "AB_REQUESTS=100000" >> "$GITHUB_ENV"
+          echo "AB_CONNECTIONS=100" >> "$GITHUB_ENV"
 
           if [ "${{ inputs.h2c_enabled }}" = "true" ]; then
             echo "BENCH_H2C=1" >> "$GITHUB_ENV"

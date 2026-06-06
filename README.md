@@ -4,7 +4,7 @@
 
 **⚡ A · R · V · I · K — Async Rust Velocity Integration Kit**
 
-*Built on Tokio + Hyper. Engineered for maximum performance.*
+*Built on Tokio + Hyper. Tuned for low-latency async services.*
 
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
@@ -19,7 +19,7 @@
 
 **Arvik** stands for **A**sync **R**ust **V**elocity **I**ntegration **K**it.
 
-It is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**, designed to unify the best features of Axum and Actix-web under one ergonomic, blazing-fast API.
+It is a high-performance Rust web framework built from the ground up on **Tokio** and **Hyper 1.x**, designed around typed routing, extractors, middleware, observability, and deployment-focused APIs.
 
 > ⚡ **v0.9.5 — Performance Sprint** Arvik now ships socket tuning, HTTP/2 throughput presets, lower-copy body paths, runtime tuning helpers, benchmark examples, declarative validation, structured logging, Prometheus metrics, OpenTelemetry tracing, health probes, proc macros, test utilities, configuration, and graceful shutdown. Follow along on [YouTube](https://youtube.com/@AarambhDevHub) or join the [Discord](https://discord.gg/HDth6PfCnp) to track progress.
 
@@ -772,29 +772,24 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical specification incl
 
 ## Performance
 
-Arvik aims to unify extreme ergonomics with world-class performance. The 0.9.x
-benchmark suite lives in `examples/benchmarks` and can be run locally with
-`scripts/bench/run-all.sh`. Local numbers depend on CPU, kernel, governor,
-open-file limits, and background load; the manual GitHub benchmark workflow is
-a manual artifact workflow, not a release-grade performance claim. Use the
-workflow's `manual` profile for publishable artifacts; the `smoke` profile is a
-5s validation run only.
+Arvik includes a benchmark validation suite under `examples/benchmarks`.
+Run local smoke validation with:
 
-The HTTP/1.1 benchmark endpoints start normal `serve` servers and use `wrk`
-plus `hey`. The h2c benchmark starts a separate `serve_h2c` server and only
-then runs `h2load` from `nghttp2-client`. Raw outputs are written separately:
-`wrk_plaintext.txt`, `hey_plaintext.txt`, `h2load_h2c_plaintext.txt`,
-`summary.json`, and `summary.md`. If h2c is disabled with `BENCH_H2C=0`,
-`h2load` is marked skipped instead of failed.
+```bash
+BENCH_PROFILE=smoke scripts/bench/run-all.sh
+```
 
-Historical simple TCP path routing numbers (`wrk -t4 -c100 -d10s`, release
-mode, same hardware):
+Manual benchmark artifacts use repeated measured runs, warmup, raw output
+capture, and median/min/max summaries:
 
-| Framework | Version | Requests / sec | Latency (avg) | Underlying Engine |
-| --- | --- | --- | --- | --- |
-| Actix-Web | v4 | `331,131 req/s` | `483 µs` | Custom HTTP worker model |
-| Axum | v0.8.x | `301,439 req/s` | `349 µs` | Tokio / Hyper 1.x |
-| **Arvik** | **v0.3.4** | **`307,177 req/s`** | **`333 µs`** | Tokio / Hyper 1.x |
+```bash
+BENCH_PROFILE=manual BENCH_RUNS=3 scripts/bench/run-all.sh
+```
+
+Local numbers depend on CPU, kernel, governor, open-file limits, installed
+benchmark tools, and background load. The manual GitHub benchmark workflow is
+artifact-based and intended for benchmark validation, not competitive claims.
+See [BENCHMARKS.md](BENCHMARKS.md) for parameters and output format.
 
 DB-style benchmark bins are behind the example-local `postgres` feature. They
 use in-memory fallback data when `DATABASE_URL` is absent so compile checks and

@@ -26,6 +26,7 @@
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use arvik_core::{Request, Response};
@@ -418,7 +419,7 @@ impl<S> Layer<S> for SecurityHeadersLayer {
     fn layer(&self, inner: S) -> Self::Service {
         SecurityHeadersService {
             inner,
-            config: self.clone(),
+            headers: build_security_headers(self),
         }
     }
 }
@@ -427,7 +428,7 @@ impl<S> Layer<S> for SecurityHeadersLayer {
 #[derive(Clone)]
 pub struct SecurityHeadersService<S> {
     inner: S,
-    config: SecurityHeadersLayer,
+    headers: Arc<[(HeaderName, HeaderValue)]>,
 }
 
 impl<S> Service<Request> for SecurityHeadersService<S>
@@ -446,29 +447,14 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
-        let config = self.config.clone();
+        let headers = Arc::clone(&self.headers);
 
         Box::pin(async move {
             let mut response = inner.call(req).await?;
             let h = response.headers_mut();
 
-            set_header(h, "x-frame-options", config.frame_options);
-            set_header(h, "x-content-type-options", "nosniff");
-            set_header(h, "x-xss-protection", "1; mode=block");
-            set_header(
-                h,
-                "strict-transport-security",
-                &format!("max-age={}; includeSubDomains", config.hsts_max_age),
-            );
-            set_header(h, "referrer-policy", "strict-origin-when-cross-origin");
-            set_header(
-                h,
-                "permissions-policy",
-                "geolocation=(), microphone=(), camera=(), payment=()",
-            );
-
-            if let Some(csp) = &config.csp {
-                set_header(h, "content-security-policy", csp);
+            for (name, value) in headers.iter() {
+                h.entry(name.clone()).or_insert_with(|| value.clone());
             }
 
             Ok(response)
@@ -476,11 +462,83 @@ where
     }
 }
 
-fn set_header(headers: &mut http::HeaderMap, name: &str, value: &str) {
-    if let (Ok(n), Ok(v)) = (
-        HeaderName::from_bytes(name.as_bytes()),
-        HeaderValue::from_str(value),
-    ) {
-        headers.entry(n).or_insert(v);
+fn build_security_headers(config: &SecurityHeadersLayer) -> Arc<[(HeaderName, HeaderValue)]> {
+    let mut headers = Vec::with_capacity(7);
+    headers.push((
+        HeaderName::from_static("x-frame-options"),
+        HeaderValue::from_static(config.frame_options),
+    ));
+    headers.push((
+        HeaderName::from_static("x-content-type-options"),
+        HeaderValue::from_static("nosniff"),
+    ));
+    headers.push((
+        HeaderName::from_static("x-xss-protection"),
+        HeaderValue::from_static("1; mode=block"),
+    ));
+    headers.push((
+        HeaderName::from_static("strict-transport-security"),
+        HeaderValue::from_str(&format!(
+            "max-age={}; includeSubDomains",
+            config.hsts_max_age
+        ))
+        .expect("generated HSTS header is valid"),
+    ));
+    headers.push((
+        HeaderName::from_static("referrer-policy"),
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    ));
+    headers.push((
+        HeaderName::from_static("permissions-policy"),
+        HeaderValue::from_static("geolocation=(), microphone=(), camera=(), payment=()"),
+    ));
+
+    if let Some(csp) = &config.csp {
+        headers.push((
+            HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_str(csp).expect("configured CSP header is valid"),
+        ));
+    }
+
+    headers.into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arvik_core::{Body, ResponseBuilder};
+    use std::future::{Ready, ready};
+
+    #[derive(Clone)]
+    struct OkService;
+
+    impl Service<Request> for OkService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = Ready<Result<Response, Infallible>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Request) -> Self::Future {
+            ready(Ok(ResponseBuilder::new()
+                .header("x-frame-options", "SAMEORIGIN")
+                .body(Body::empty())))
+        }
+    }
+
+    #[tokio::test]
+    async fn security_headers_are_precomputed_and_do_not_override_existing() {
+        let mut service = SecurityHeadersLayer::new().layer(OkService);
+        let req = Request::new(http::Request::builder().body(Body::empty()).unwrap());
+        let response = service.call(req).await.unwrap();
+
+        assert_eq!(response.headers()["x-frame-options"], "SAMEORIGIN");
+        assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+        assert_eq!(
+            response.headers()["strict-transport-security"],
+            "max-age=31536000; includeSubDomains"
+        );
     }
 }

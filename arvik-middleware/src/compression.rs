@@ -32,6 +32,7 @@ use async_compression::tokio::bufread::{
 };
 use http::header::{ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, VARY};
 use http::{HeaderValue, StatusCode};
+use http_body::Body as _;
 use tokio::io::AsyncReadExt;
 use tokio_util::bytes::Bytes;
 use tower_layer::Layer;
@@ -144,17 +145,18 @@ impl CompressionLayer {
 
     fn preferred_encoding(&self, accept_encoding: &str) -> Option<Encoding> {
         // Simple preference: zstd > br > gzip > deflate
-        let lower = accept_encoding.to_lowercase();
-        if self.zstd && lower.contains("zstd") {
+        if self.zstd && accepts_token(accept_encoding, "zstd") {
             return Some(Encoding::Zstd);
         }
-        if self.br && (lower.contains("br") || lower.contains("brotli")) {
+        if self.br
+            && (accepts_token(accept_encoding, "br") || accepts_token(accept_encoding, "brotli"))
+        {
             return Some(Encoding::Br);
         }
-        if self.gzip && lower.contains("gzip") {
+        if self.gzip && accepts_token(accept_encoding, "gzip") {
             return Some(Encoding::Gzip);
         }
-        if self.deflate && lower.contains("deflate") {
+        if self.deflate && accepts_token(accept_encoding, "deflate") {
             return Some(Encoding::Deflate);
         }
         None
@@ -194,17 +196,20 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         let config = self.config.clone();
-        let accept_encoding = req
+        let encoding = req
             .headers()
             .get(ACCEPT_ENCODING)
             .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
+            .and_then(|value| config.preferred_encoding(value));
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
 
         Box::pin(async move {
+            let Some(encoding) = encoding else {
+                return inner.call(req).await;
+            };
+
             let response = inner.call(req).await?;
 
             // Don't compress if already encoded.
@@ -217,11 +222,6 @@ where
                 return Ok(response);
             }
 
-            let encoding = match config.preferred_encoding(&accept_encoding) {
-                Some(e) => e,
-                None => return Ok(response),
-            };
-
             Ok(compress_response(response, encoding, &config).await)
         })
     }
@@ -233,6 +233,17 @@ async fn compress_response(
     config: &CompressionLayer,
 ) -> Response {
     let (mut parts, body) = response.into_parts();
+
+    let size_hint = body.size_hint();
+    if size_hint
+        .upper()
+        .is_some_and(|upper| upper < config.min_size as u64)
+    {
+        parts
+            .headers
+            .insert(VARY, HeaderValue::from_static("Accept-Encoding"));
+        return http::Response::from_parts(parts, body);
+    }
 
     let body_bytes: Bytes = match body.to_bytes().await {
         Ok(b) => b,
@@ -305,6 +316,21 @@ async fn compress_bytes(data: &[u8], encoding: Encoding) -> std::io::Result<Vec<
             Ok(out)
         }
     }
+}
+
+fn accepts_token(header: &str, encoding: &str) -> bool {
+    header.split(',').any(|part| {
+        let mut pieces = part.trim().split(';');
+        let token = pieces.next().unwrap_or("").trim();
+        let mut q = 1.0_f32;
+        for param in pieces {
+            let param = param.trim();
+            if let Some(value) = param.strip_prefix("q=") {
+                q = value.parse::<f32>().unwrap_or(0.0);
+            }
+        }
+        q > 0.0 && (token.eq_ignore_ascii_case(encoding) || token == "*")
+    })
 }
 
 fn should_compress(headers: &http::HeaderMap) -> bool {
@@ -432,5 +458,52 @@ where
             let req = Request::from_request_parts(parts, new_body);
             inner.call(req).await
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arvik_core::ResponseBuilder;
+    use std::future::{Ready, ready};
+
+    #[derive(Clone)]
+    struct SmallTextService;
+
+    impl Service<Request> for SmallTextService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = Ready<Result<Response, Infallible>>;
+
+        fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _req: Request) -> Self::Future {
+            ready(Ok(ResponseBuilder::new()
+                .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+                .body(Body::from_static(b"small"))))
+        }
+    }
+
+    #[tokio::test]
+    async fn compression_uses_size_hint_to_skip_small_bodies() {
+        let mut service = CompressionLayer::new()
+            .min_size(1024)
+            .layer(SmallTextService);
+        let req = Request::new(
+            http::Request::builder()
+                .header(ACCEPT_ENCODING, "gzip")
+                .body(Body::empty())
+                .unwrap(),
+        );
+
+        let response = service.call(req).await.unwrap();
+        assert!(!response.headers().contains_key(CONTENT_ENCODING));
+        assert_eq!(response.headers()[VARY], "Accept-Encoding");
+        assert_eq!(
+            response.into_body().to_bytes().await.unwrap(),
+            Bytes::from_static(b"small")
+        );
     }
 }
