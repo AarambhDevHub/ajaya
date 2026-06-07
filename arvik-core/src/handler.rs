@@ -62,6 +62,14 @@ pub trait Handler<T, S = ()>: Clone + Send + 'static {
 
     /// Call this handler with the given request and state.
     fn call(self, req: Request, state: S) -> Self::Future;
+
+    /// Call this handler and erase the returned future.
+    fn call_boxed(self, req: Request, state: S) -> BoxFuture<'static, Response>
+    where
+        Self: Sized,
+    {
+        Box::pin(self.call(req, state))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -79,6 +87,10 @@ where
 
     fn call(self, _req: Request, _state: S) -> Self::Future {
         Box::pin(async move { self().await.into_response() })
+    }
+
+    fn call_boxed(self, req: Request, state: S) -> BoxFuture<'static, Response> {
+        self.call(req, state)
     }
 }
 
@@ -131,6 +143,10 @@ macro_rules! impl_handler {
 
                     self($($ty,)* $last).await.into_response()
                 })
+            }
+
+            fn call_boxed(self, req: Request, state: S) -> BoxFuture<'static, Response> {
+                self.call(req, state)
             }
         }
     };
@@ -194,8 +210,7 @@ where
     }
 
     fn call(self: Box<Self>, req: Request, state: S) -> BoxFuture<'static, Response> {
-        let fut = self.handler.call(req, state);
-        Box::pin(fut)
+        self.handler.call_boxed(req, state)
     }
 }
 

@@ -44,7 +44,7 @@
 //! }
 //! ```
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use http::{HeaderMap, HeaderValue, StatusCode, header};
 use http_body_util::BodyExt as _;
 
@@ -79,6 +79,42 @@ use crate::response::{Response, ResponseBuilder};
 pub trait IntoResponse {
     /// Convert this value into an HTTP [`Response`].
     fn into_response(self) -> Response;
+}
+
+/// Serialize a value into an Arvik JSON response body.
+#[doc(hidden)]
+pub fn serialize_json_body<T: serde::Serialize>(value: &T) -> Result<Body, serde_json::Error> {
+    serde_json::to_vec(value).map(Body::from)
+}
+
+/// Build an `application/json` response from an already serialized body.
+#[doc(hidden)]
+#[inline]
+pub fn json_body_response(body: Body) -> Response {
+    let exact_len = body.exact_size_hint();
+    let mut response = Response::new(body);
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    insert_exact_content_length(headers, exact_len);
+    response
+}
+
+#[inline]
+fn insert_exact_content_length(headers: &mut HeaderMap, exact_len: Option<u64>) {
+    if headers.contains_key(header::CONTENT_LENGTH) {
+        return;
+    }
+
+    if let Some(len) = exact_len {
+        let mut buf = itoa::Buffer::new();
+        headers.insert(
+            header::CONTENT_LENGTH,
+            HeaderValue::from_str(buf.format(len)).expect("valid Content-Length"),
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -171,11 +207,15 @@ impl IntoResponse for &'static str {
 
 impl IntoResponse for Bytes {
     fn into_response(self) -> Response {
-        let mut response = Response::new(Body::from_bytes(self));
-        response.headers_mut().insert(
+        let body = Body::from_bytes(self);
+        let exact_len = body.exact_size_hint();
+        let mut response = Response::new(body);
+        let headers = response.headers_mut();
+        headers.insert(
             header::CONTENT_TYPE,
             HeaderValue::from_static("application/octet-stream"),
         );
+        insert_exact_content_length(headers, exact_len);
         response
     }
 }
@@ -346,6 +386,13 @@ mod tests {
             "application/json"
         );
         assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_LENGTH)
+                .unwrap(),
+            "16"
+        );
+        assert_eq!(
             response.into_body().to_bytes().await.unwrap(),
             Bytes::from_static(br#"{"name":"Arvik"}"#)
         );
@@ -367,6 +414,13 @@ mod tests {
         let response = Json(Fails).into_response();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_LENGTH)
+                .unwrap(),
+            "43"
+        );
+        assert_eq!(
             response.into_body().to_bytes().await.unwrap(),
             Bytes::from_static(br#"{"error":"Serialization failed","code":500}"#)
         );
@@ -379,6 +433,13 @@ mod tests {
         assert_eq!(
             response.headers().get(http::header::CONTENT_TYPE).unwrap(),
             "text/plain; charset=utf-8"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_LENGTH)
+                .unwrap(),
+            "5"
         );
         let hint = http_body::Body::size_hint(response.body());
         assert_eq!(hint.lower(), 5);
@@ -396,6 +457,13 @@ mod tests {
         assert_eq!(
             response.headers().get(http::header::CONTENT_TYPE).unwrap(),
             "application/octet-stream"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(http::header::CONTENT_LENGTH)
+                .unwrap(),
+            "3"
         );
         assert_eq!(
             response.into_body().to_bytes().await.unwrap(),
@@ -489,12 +557,11 @@ pub struct Json<T>(pub T);
 
 impl<T: serde::Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        let mut writer = BytesMut::with_capacity(128).writer();
-        match serde_json::to_writer(&mut writer, &self.0) {
-            Ok(()) => json_response(Body::from_bytes(writer.into_inner().freeze())),
+        match serialize_json_body(&self.0) {
+            Ok(body) => json_body_response(body),
             Err(err) => {
                 tracing::error!("JSON serialization failed: {err}");
-                let mut response = json_response(Body::from_static(
+                let mut response = json_body_response(Body::from_static(
                     br#"{"error":"Serialization failed","code":500}"#,
                 ));
                 *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
@@ -532,20 +599,13 @@ impl<T: Into<String>> IntoResponse for Html<T> {
 
 #[inline]
 fn text_response(body: Body) -> Response {
+    let exact_len = body.exact_size_hint();
     let mut response = Response::new(body);
-    response.headers_mut().insert(
+    let headers = response.headers_mut();
+    headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("text/plain; charset=utf-8"),
     );
-    response
-}
-
-#[inline]
-fn json_response(body: Body) -> Response {
-    let mut response = Response::new(body);
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
+    insert_exact_content_length(headers, exact_len);
     response
 }

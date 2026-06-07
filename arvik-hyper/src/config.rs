@@ -102,6 +102,35 @@ impl ServerConfig {
             .tcp_nodelay(true)
     }
 
+    /// Create a config tuned for local HTTP/1.1 throughput benchmarks.
+    ///
+    /// This is intentionally opt-in: it uses larger socket queues and, on Unix,
+    /// SO_REUSEPORT with one accept worker per available CPU.
+    pub fn benchmark_http1() -> Self {
+        let workers = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1);
+
+        let config = Self::default()
+            .tcp_nodelay(true)
+            .reuse_address(true)
+            .accept_workers(workers)
+            .backlog(4096)
+            .socket_recv_buffer_size(256 * 1024)
+            .socket_send_buffer_size(256 * 1024)
+            .http1_pipeline_flush(true);
+
+        #[cfg(unix)]
+        {
+            config.reuse_port(true)
+        }
+
+        #[cfg(not(unix))]
+        {
+            config
+        }
+    }
+
     /// Set the maximum number of concurrently accepted connections.
     ///
     /// Connections accepted while this limit is reached are closed immediately.
@@ -511,5 +540,22 @@ mod tests {
         assert_eq!(high.tcp_nodelay_setting(), Some(true));
         assert_eq!(high.http2_max_concurrent_streams, Some(2_000));
         assert_eq!(high.http2_initial_connection_window_size, Some(8_388_608));
+    }
+
+    #[test]
+    fn benchmark_http1_preset_stores_expected_values() {
+        let config = ServerConfig::benchmark_http1();
+
+        assert_eq!(config.tcp_nodelay_setting(), Some(true));
+        assert!(config.reuse_address_enabled());
+        #[cfg(unix)]
+        assert!(config.reuse_port_enabled());
+        #[cfg(not(unix))]
+        assert!(!config.reuse_port_enabled());
+        assert!(config.accept_workers_count() >= 1);
+        assert_eq!(config.backlog_size(), Some(4096));
+        assert_eq!(config.socket_recv_buffer_size_value(), Some(256 * 1024));
+        assert_eq!(config.socket_send_buffer_size_value(), Some(256 * 1024));
+        assert!(config.needs_tuned_listener());
     }
 }

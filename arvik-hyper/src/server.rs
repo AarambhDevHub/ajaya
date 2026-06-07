@@ -114,7 +114,7 @@ impl Server {
         H: Handler<T> + Clone + Send + Sync + 'static,
         T: 'static,
     {
-        self.serve_service(BoxCloneService::new(HandlerService {
+        self.serve_service(BoxCloneService::new_always_ready(HandlerService {
             handler,
             _marker: PhantomData,
         }))
@@ -134,7 +134,7 @@ impl Server {
         F: Future<Output = ()> + Send,
     {
         self.serve_service_with_graceful_shutdown(
-            BoxCloneService::new(HandlerService {
+            BoxCloneService::new_always_ready(HandlerService {
                 handler,
                 _marker: PhantomData,
             }),
@@ -146,8 +146,10 @@ impl Server {
 
     /// Serve a [`MethodRouter`] (single path, method dispatch).
     pub async fn serve_method_router(self, router: MethodRouter) -> Result<(), BoxError> {
-        self.serve_service(BoxCloneService::new(MethodRouterService { router }))
-            .await
+        self.serve_service(BoxCloneService::new_always_ready(MethodRouterService {
+            router: router.compile(()),
+        }))
+        .await
     }
 
     /// Serve a [`MethodRouter`] until `signal` resolves.
@@ -161,7 +163,9 @@ impl Server {
         F: Future<Output = ()> + Send,
     {
         self.serve_service_with_graceful_shutdown(
-            BoxCloneService::new(MethodRouterService { router }),
+            BoxCloneService::new_always_ready(MethodRouterService {
+                router: router.compile(()),
+            }),
             signal,
             shutdown_config,
         )
@@ -753,7 +757,9 @@ async fn run_connection<I>(
         let mut service = service.clone();
         async move {
             let arvik_req = Request::from_hyper(req);
-            let _ = std::future::poll_fn(|cx| service.poll_ready(cx)).await;
+            if !service.is_always_ready() {
+                let _ = std::future::poll_fn(|cx| service.poll_ready(cx)).await;
+            }
             let response = service
                 .call(arvik_req)
                 .await

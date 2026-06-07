@@ -14,7 +14,6 @@
 //!     .text("Hello, Arvik!");
 //! ```
 
-use bytes::{BufMut, BytesMut};
 use http::StatusCode;
 
 use crate::Body;
@@ -73,6 +72,21 @@ impl ResponseBuilder {
         self
     }
 
+    fn content_length_if_absent(mut self, len: usize) -> Self {
+        let has_content_length = self
+            .inner
+            .headers_ref()
+            .is_some_and(|headers| headers.contains_key(http::header::CONTENT_LENGTH));
+
+        if !has_content_length {
+            self.inner = self
+                .inner
+                .header(http::header::CONTENT_LENGTH, content_length(len));
+        }
+
+        self
+    }
+
     /// Build the response with the given body.
     pub fn body(self, body: impl Into<Body>) -> Response {
         self.inner.body(body.into()).expect("valid response")
@@ -83,27 +97,32 @@ impl ResponseBuilder {
     /// Serializes `data` as JSON, sets `Content-Type: application/json`,
     /// and returns the response.
     pub fn json<T: serde::Serialize>(self, data: &T) -> Response {
-        let mut writer = BytesMut::with_capacity(128).writer();
-        serde_json::to_writer(&mut writer, data).expect("valid JSON serialization");
-        let json_bytes = writer.into_inner().freeze();
+        let json_bytes = serde_json::to_vec(data).expect("valid JSON serialization");
         self.header(http::header::CONTENT_TYPE, "application/json")
-            .body(Body::from_bytes(json_bytes))
+            .content_length_if_absent(json_bytes.len())
+            .body(Body::from(json_bytes))
     }
 
     /// Build an HTML response.
     ///
     /// Sets `Content-Type: text/html; charset=utf-8`.
     pub fn html(self, html: impl Into<String>) -> Response {
+        let html = html.into();
+        let len = html.len();
         self.header(http::header::CONTENT_TYPE, "text/html; charset=utf-8")
-            .body(Body::from(html.into()))
+            .content_length_if_absent(len)
+            .body(Body::from(html))
     }
 
     /// Build a plain text response.
     ///
     /// Sets `Content-Type: text/plain; charset=utf-8`.
     pub fn text(self, text: impl Into<String>) -> Response {
+        let text = text.into();
+        let len = text.len();
         self.header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-            .body(Body::from(text.into()))
+            .content_length_if_absent(len)
+            .body(Body::from(text))
     }
 
     /// Build a response with an empty body.
@@ -116,6 +135,11 @@ impl Default for ResponseBuilder {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn content_length(len: usize) -> http::HeaderValue {
+    let mut buf = itoa::Buffer::new();
+    http::HeaderValue::from_str(buf.format(len)).expect("valid Content-Length")
 }
 
 /// Create a redirect response.
@@ -150,5 +174,24 @@ impl Redirect {
             .status(StatusCode::TEMPORARY_REDIRECT)
             .header(http::header::LOCATION, uri)
             .empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_builder_sets_content_length_for_fixed_text() {
+        let response = ResponseBuilder::new().text("hello");
+        assert_eq!(response.headers()[http::header::CONTENT_LENGTH], "5");
+    }
+
+    #[test]
+    fn response_builder_preserves_existing_content_length() {
+        let response = ResponseBuilder::new()
+            .header(http::header::CONTENT_LENGTH, "99")
+            .text("hello");
+        assert_eq!(response.headers()[http::header::CONTENT_LENGTH], "99");
     }
 }

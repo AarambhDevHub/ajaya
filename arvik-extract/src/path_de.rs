@@ -433,11 +433,11 @@ impl<'de> IntoEnumDeserializer<'de> for &'de str {
 }
 
 fn param_key(params: &PathParams, index: usize) -> Option<&str> {
-    params.iter().nth(index).map(|(key, _)| key)
+    params.get_index(index).map(|(key, _)| key)
 }
 
 fn param_value(params: &PathParams, index: usize) -> Option<&str> {
-    params.iter().nth(index).map(|(_, value)| value)
+    params.get_index(index).map(|(_, value)| value)
 }
 
 // Simple string deserializer for map keys

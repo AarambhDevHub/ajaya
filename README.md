@@ -773,6 +773,9 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical specification incl
 ## Performance
 
 Arvik includes a benchmark validation suite under `examples/benchmarks`.
+Arvik performance improved on the middleware/extractor overhaul branch, with
+current engineering artifacts recorded under
+`examples/benchmarks/artifacts/75284e6/`.
 Run local smoke validation with:
 
 ```bash

@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   median, min, and max RPS.
 - Default small-file byte caching for filesystem `ServeDir` and `ServeFile`,
   with cache limit and disable controls.
+- Engineering benchmark artifacts for
+  `feat/middleware-extract-overhaul@75284e616a2997a2228dcff24ad32691044d810c`.
 
 ### Changed
 
@@ -23,8 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   security header injection, compression skip paths, and static file serving.
 - Split the middleware benchmark into focused scenarios for no middleware,
   request ID, headers, tracing, CORS, rate limit, compression, and full stack.
+- Updated the middleware `full` benchmark scenario to exercise the full focused
+  middleware stack.
 - Updated benchmark documentation and public performance wording to describe
   performance improvements and benchmark validation without competitive claims.
+- Made keep-alive the explicit AB default while keeping non-keep-alive AB as an
+  optional connection-churn check.
 
 ### Fixed
 

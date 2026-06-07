@@ -113,6 +113,12 @@ impl Body {
         hint.lower() == 0 && hint.upper() == Some(0)
     }
 
+    /// Return the exact body size when the body size hint proves one.
+    pub fn exact_size_hint(&self) -> Option<u64> {
+        let hint = http_body::Body::size_hint(self);
+        hint.upper().filter(|upper| *upper == hint.lower())
+    }
+
     /// Collect the entire body into [`Bytes`].
     ///
     /// This consumes the body stream and buffers all data in memory.
@@ -364,6 +370,7 @@ mod tests {
     async fn static_body_is_zero_copy_bytes() {
         let body = Body::from_static(b"hello");
         assert!(!body.is_empty_hint());
+        assert_eq!(body.exact_size_hint(), Some(5));
         assert_eq!(body.to_bytes().await.unwrap(), Bytes::from_static(b"hello"));
     }
 

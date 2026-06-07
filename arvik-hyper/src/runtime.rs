@@ -18,6 +18,21 @@ impl RuntimeConfig {
         Self::default()
     }
 
+    /// Create a Tokio runtime config tuned for local HTTP/1.1 throughput benchmarks.
+    pub fn benchmark_http1() -> Self {
+        let workers = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(1);
+
+        Self::default()
+            .worker_threads(workers)
+            .max_blocking_threads(512)
+            .thread_name("arvik-bench")
+            .event_interval(31)
+            .global_queue_interval(31)
+            .max_io_events_per_tick(1024)
+    }
+
     /// Set the Tokio worker thread count.
     #[must_use]
     pub fn worker_threads(mut self, threads: usize) -> Self {
@@ -169,5 +184,17 @@ mod tests {
     fn builds_runtime() {
         let runtime = RuntimeConfig::new().worker_threads(1).build();
         assert!(runtime.is_ok());
+    }
+
+    #[test]
+    fn benchmark_http1_preset_stores_expected_values() {
+        let config = RuntimeConfig::benchmark_http1();
+
+        assert!(config.worker_threads_value().is_some_and(|v| v >= 1));
+        assert_eq!(config.max_blocking_threads_value(), Some(512));
+        assert_eq!(config.thread_name_value(), Some("arvik-bench"));
+        assert_eq!(config.event_interval_value(), Some(31));
+        assert_eq!(config.global_queue_interval_value(), Some(31));
+        assert_eq!(config.max_io_events_per_tick_value(), Some(1024));
     }
 }

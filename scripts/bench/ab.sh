@@ -5,6 +5,7 @@ url="${1:-http://127.0.0.1:8080/plaintext}"
 output="${2:-target/bench-results/ab_plaintext.txt}"
 requests="${AB_REQUESTS:-100000}"
 connections="${AB_CONNECTIONS:-100}"
+keepalive="${AB_KEEPALIVE:-1}"
 
 mkdir -p "$(dirname "$output")"
 
@@ -13,4 +14,13 @@ if ! command -v ab >/dev/null 2>&1; then
   exit 127
 fi
 
-ab -k -n "$requests" -c "$connections" "$url" | tee "$output"
+args=(-n "$requests" -c "$connections")
+case "$keepalive" in
+  0|false|FALSE|no|NO|off|OFF)
+    ;;
+  *)
+    args=(-k "${args[@]}")
+    ;;
+esac
+
+ab "${args[@]}" "$url" | tee "$output"

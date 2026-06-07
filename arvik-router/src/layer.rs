@@ -27,7 +27,10 @@ use tower_service::Service;
 ///
 /// Wraps any `Service<Request, Response = Response, Error = Infallible>` that is
 /// `Clone + Send + 'static` with a `Send + 'static` future.
-pub struct BoxCloneService(Box<dyn ErasedSvc>);
+pub struct BoxCloneService {
+    inner: Box<dyn ErasedSvc>,
+    always_ready: bool,
+}
 
 /// A closure that applies a Tower layer to a [`BoxCloneService`] and returns a new one.
 ///
@@ -43,7 +46,7 @@ pub type LayerFn = Arc<dyn Fn(BoxCloneService) -> BoxCloneService + Send + Sync 
 // ── BoxCloneService ─────────────────────────────────────────────────────────
 
 /// Object-safe inner trait.
-trait ErasedSvc: Send {
+trait ErasedSvc: Send + Sync {
     fn call_erased(
         &mut self,
         req: Request,
@@ -56,7 +59,7 @@ trait ErasedSvc: Send {
 
 impl<S> ErasedSvc for S
 where
-    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     fn call_erased(
@@ -79,16 +82,51 @@ impl BoxCloneService {
     /// Wrap a concrete service in a `BoxCloneService`.
     pub fn new<S>(svc: S) -> Self
     where
-        S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        S: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         S::Future: Send + 'static,
     {
-        Self(Box::new(svc))
+        Self {
+            inner: Box::new(svc),
+            always_ready: false,
+        }
+    }
+
+    /// Wrap a concrete service that is known to always return ready immediately.
+    ///
+    /// This is intended for Arvik's built-in leaf services. User-provided
+    /// Tower layers should use [`BoxCloneService::new`] unless they can
+    /// guarantee `poll_ready` never applies backpressure.
+    pub fn new_always_ready<S>(svc: S) -> Self
+    where
+        S: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        S::Future: Send + 'static,
+    {
+        Self {
+            inner: Box::new(svc),
+            always_ready: true,
+        }
+    }
+
+    /// Return true when this service can skip Tower readiness polling.
+    pub fn is_always_ready(&self) -> bool {
+        self.always_ready
     }
 }
 
 impl Clone for BoxCloneService {
     fn clone(&self) -> Self {
-        Self(self.0.clone_box())
+        Self {
+            inner: self.inner.clone_box(),
+            always_ready: self.always_ready,
+        }
     }
 }
 
@@ -98,11 +136,11 @@ impl Service<Request> for BoxCloneService {
     type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.0.poll_ready_erased(cx)
+        self.inner.poll_ready_erased(cx)
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        self.0.call_erased(req)
+        self.inner.call_erased(req)
     }
 }
 
@@ -127,7 +165,8 @@ impl std::fmt::Debug for BoxCloneService {
 pub fn into_layer_fn<L>(layer: L) -> LayerFn
 where
     L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-    L::Service: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    L::Service:
+        Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
     <L::Service as Service<Request>>::Future: Send + 'static,
 {
     Arc::new(move |svc: BoxCloneService| -> BoxCloneService {
@@ -152,10 +191,11 @@ pub fn apply_layers(base: BoxCloneService, layers: &[LayerFn]) -> BoxCloneServic
 pub async fn oneshot(mut svc: BoxCloneService, req: Request) -> Response {
     use std::future::poll_fn;
 
-    // Poll ready (our services return immediately but this is correct Tower usage)
-    poll_fn(|cx| svc.poll_ready(cx))
-        .await
-        .unwrap_or_else(|infallible| match infallible {});
+    if !svc.is_always_ready() {
+        poll_fn(|cx| svc.poll_ready(cx))
+            .await
+            .unwrap_or_else(|infallible| match infallible {});
+    }
 
     svc.call(req)
         .await

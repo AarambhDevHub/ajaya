@@ -51,6 +51,16 @@ impl PathParams {
         self.pairs.iter().map(|(k, v)| (k.as_ref(), v.as_str()))
     }
 
+    /// Return a parameter by insertion index.
+    ///
+    /// This preserves router capture order for tuple-style extraction while
+    /// avoiding repeated iterator scans in deserializers.
+    pub fn get_index(&self, index: usize) -> Option<(&str, &str)> {
+        self.pairs
+            .get(index)
+            .map(|(key, value)| (key.as_ref(), value.as_str()))
+    }
+
     /// Returns the number of parameters.
     pub fn len(&self) -> usize {
         self.pairs.len()
@@ -92,5 +102,16 @@ mod tests {
 
         let collected: Vec<_> = params.iter().collect();
         assert_eq!(collected, vec![("a", "1"), ("b", "2")]);
+    }
+
+    #[test]
+    fn test_path_params_get_index() {
+        let mut params = PathParams::new();
+        params.push(Arc::from("a"), "1".to_string());
+        params.push(Arc::from("b"), "2".to_string());
+
+        assert_eq!(params.get_index(0), Some(("a", "1")));
+        assert_eq!(params.get_index(1), Some(("b", "2")));
+        assert_eq!(params.get_index(2), None);
     }
 }

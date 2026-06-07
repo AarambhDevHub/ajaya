@@ -130,6 +130,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "hyper",
+ "itoa",
  "mime",
  "pin-project-lite",
  "serde",

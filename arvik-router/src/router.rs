@@ -20,7 +20,7 @@
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use arvik_core::handler::ErasedHandler;
@@ -322,8 +322,11 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.layers.push(into_layer_fn(layer));
@@ -344,8 +347,11 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     pub fn route_layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.route_layers.push(into_layer_fn(layer));
@@ -462,17 +468,19 @@ impl Router<()> {
             .routes
             .into_iter()
             .map(|entry| {
+                let method_router = entry.method_router.compile(());
                 let route_service = if route_layers.is_empty() {
                     None
                 } else {
-                    let base =
-                        BoxCloneService::new(MethodRouterService(entry.method_router.clone()));
-                    Some(Arc::new(Mutex::new(apply_layers(base, &route_layers))))
+                    let base = BoxCloneService::new_always_ready(MethodRouterService(
+                        method_router.clone(),
+                    ));
+                    Some(Arc::new(apply_layers(base, &route_layers)))
                 };
 
                 CompiledRouteEntry {
                     pattern: entry.pattern,
-                    method_router: entry.method_router,
+                    method_router,
                     param_names: entry.param_names,
                     route_service,
                 }
@@ -487,7 +495,7 @@ impl Router<()> {
         });
 
         // Wrap in a clone-friendly Tower service
-        let base = BoxCloneService::new(RouterService(inner));
+        let base = BoxCloneService::new_always_ready(RouterService(inner));
 
         // Apply outer layers (first added = innermost)
         apply_layers(base, &outer_layers)
@@ -514,7 +522,7 @@ struct CompiledRouteEntry {
     pattern: Arc<str>,
     method_router: MethodRouter<()>,
     param_names: Arc<[Arc<str>]>,
-    route_service: Option<Arc<Mutex<BoxCloneService>>>,
+    route_service: Option<Arc<BoxCloneService>>,
 }
 
 impl RouterInner {
@@ -542,10 +550,7 @@ impl RouterInner {
                 req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
                 let mut response = match &entry.route_service {
-                    Some(service) => {
-                        let service = service.lock().expect("route service lock poisoned").clone();
-                        oneshot(service, req).await
-                    }
+                    Some(service) => oneshot((**service).clone(), req).await,
                     None => entry.method_router.call(req, ()).await,
                 };
                 response.extensions_mut().insert(MatchedPathExt(pattern));
@@ -878,6 +883,73 @@ mod tests {
                 .map(|matched| matched.0.as_ref()),
             Some("/users/{id}")
         );
+    }
+
+    #[tokio::test]
+    async fn route_layer_that_applies_backpressure_is_polled_ready() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        use crate::layer::BoxCloneService;
+        use tower_layer::Layer;
+
+        #[derive(Clone)]
+        struct PendingOnceLayer(Arc<AtomicBool>);
+
+        impl Layer<BoxCloneService> for PendingOnceLayer {
+            type Service = PendingOnceService;
+
+            fn layer(&self, inner: BoxCloneService) -> Self::Service {
+                PendingOnceService {
+                    inner,
+                    ready_seen: Arc::clone(&self.0),
+                }
+            }
+        }
+
+        #[derive(Clone)]
+        struct PendingOnceService {
+            inner: BoxCloneService,
+            ready_seen: Arc<AtomicBool>,
+        }
+
+        impl Service<Request> for PendingOnceService {
+            type Response = Response;
+            type Error = Infallible;
+            type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send>>;
+
+            fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                if !self.ready_seen.swap(true, Ordering::SeqCst) {
+                    cx.waker().wake_by_ref();
+                    return Poll::Pending;
+                }
+                self.inner.poll_ready(cx)
+            }
+
+            fn call(&mut self, req: Request) -> Self::Future {
+                assert!(self.ready_seen.load(Ordering::SeqCst));
+                self.inner.call(req)
+            }
+        }
+
+        async fn h() -> &'static str {
+            "ok"
+        }
+
+        let ready_seen = Arc::new(AtomicBool::new(false));
+        let mut app = Router::new()
+            .route("/ready", crate::get(h))
+            .route_layer(PendingOnceLayer(Arc::clone(&ready_seen)))
+            .into_service();
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/ready")
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        );
+
+        let res = app.call(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(ready_seen.load(Ordering::SeqCst));
     }
 
     #[tokio::test]

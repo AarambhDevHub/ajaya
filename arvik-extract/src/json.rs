@@ -23,11 +23,10 @@
 
 use arvik_core::body::Body;
 use arvik_core::extract::FromRequest;
-use arvik_core::into_response::IntoResponse;
+use arvik_core::into_response::{IntoResponse, json_body_response, serialize_json_body};
 use arvik_core::request::Request;
 use arvik_core::response::Response;
-use bytes::{BufMut, BytesMut};
-use http::{HeaderValue, StatusCode, header};
+use http::StatusCode;
 use serde::de::DeserializeOwned;
 
 use crate::rejection::JsonRejection;
@@ -72,27 +71,16 @@ where
 
 impl<T: serde::Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        let mut writer = BytesMut::with_capacity(128).writer();
-        match serde_json::to_writer(&mut writer, &self.0) {
-            Ok(()) => json_response(Body::from_bytes(writer.into_inner().freeze())),
+        match serialize_json_body(&self.0) {
+            Ok(body) => json_body_response(body),
             Err(err) => {
                 let body = format!("{{\"error\":\"JSON serialization failed: {}\"}}", err);
-                let mut response = json_response(Body::from(body));
+                let mut response = json_body_response(Body::from(body));
                 *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                 response
             }
         }
     }
-}
-
-#[inline]
-fn json_response(body: Body) -> Response {
-    let mut response = Response::new(body);
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    response
 }
 
 /// Check if the Content-Type header indicates JSON.

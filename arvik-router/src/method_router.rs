@@ -23,12 +23,18 @@ use arvik_core::method_filter::MethodFilter;
 use arvik_core::request::Request;
 use arvik_core::response::{Response, ResponseBuilder};
 use http::StatusCode;
+use smallvec::SmallVec;
 use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn, oneshot};
 
 // ── MethodRouter ────────────────────────────────────────────────────────────
+
+type HandlerEntry<S> = (MethodFilter, Box<dyn ErasedHandler<S>>);
+type HandlerEntries<S> = SmallVec<[HandlerEntry<S>; 4]>;
+type CompiledEntry = (MethodFilter, BoxCloneService);
+type CompiledEntries = SmallVec<[CompiledEntry; 4]>;
 
 /// Stores one handler per HTTP method for a single route.
 ///
@@ -43,20 +49,26 @@ use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn, onesho
 /// ```
 pub struct MethodRouter<S = ()> {
     /// (method_filter, type-erased handler) pairs.
-    handlers: Vec<(MethodFilter, Box<dyn ErasedHandler<S>>)>,
+    handlers: HandlerEntries<S>,
     /// Bitmask of all registered methods — used to build the `Allow` header.
     allow_methods: MethodFilter,
+    /// Cached value for 405 responses.
+    allow_header: Arc<str>,
     /// Tower layers applied to each matched handler (innermost = first in vec).
     layers: Vec<LayerFn>,
+    /// Pre-built layered services. Populated when state is already bound.
+    compiled: Option<CompiledEntries>,
 }
 
 impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// Create an empty `MethodRouter` with no handlers.
     pub fn new() -> Self {
         Self {
-            handlers: Vec::new(),
+            handlers: SmallVec::new(),
             allow_methods: MethodFilter::NONE,
+            allow_header: Arc::from(""),
             layers: Vec::new(),
+            compiled: None,
         }
     }
 
@@ -67,7 +79,9 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         T: 'static,
     {
         self.allow_methods |= filter;
+        self.allow_header = Arc::from(build_allow_header(self.allow_methods));
         self.handlers.push((filter, into_erased(handler)));
+        self.compiled = None;
         self
     }
 
@@ -81,8 +95,10 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         }
 
         self.allow_methods |= other.allow_methods;
+        self.allow_header = Arc::from(build_allow_header(self.allow_methods));
         self.handlers.extend(other.handlers);
         self.layers.extend(other.layers);
+        self.compiled = None;
         self
     }
 
@@ -173,11 +189,39 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.layers.push(into_layer_fn(layer));
+        self.compiled = None;
+        self
+    }
+
+    /// Pre-build per-method layered services for a router whose state is known.
+    #[doc(hidden)]
+    pub fn compile(mut self, state: S) -> Self {
+        if self.layers.is_empty() {
+            self.compiled = None;
+            return self;
+        }
+
+        let compiled = self
+            .handlers
+            .iter()
+            .map(|(filter, handler)| {
+                let base = BoxCloneService::new_always_ready(HandlerService {
+                    handler: handler.clone_box(),
+                    state: state.clone(),
+                });
+                (*filter, apply_layers(base, &self.layers))
+            })
+            .collect();
+
+        self.compiled = Some(compiled);
         self
     }
 
@@ -190,6 +234,16 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         let method = req.method().clone();
         let method_filter = MethodFilter::from_method(&method);
 
+        let compiled_svc = self.compiled.as_ref().and_then(|compiled| {
+            compiled
+                .iter()
+                .find(|(compiled_filter, _)| compiled_filter.contains(method_filter))
+                .map(|(_, svc)| svc.clone())
+        });
+        if let Some(svc) = compiled_svc {
+            return oneshot(svc, req).await;
+        }
+
         for (filter, handler) in &self.handlers {
             if filter.contains(method_filter) {
                 if self.layers.is_empty() {
@@ -201,7 +255,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
                     // Wrap the handler in a Tower service so layers can compose
                     // around it with the standard Layer<S> protocol.
                     let h = handler.clone_box();
-                    let base = BoxCloneService::new(HandlerService {
+                    let base = BoxCloneService::new_always_ready(HandlerService {
                         handler: h,
                         state: state.clone(),
                     });
@@ -212,10 +266,9 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         }
 
         // No handler matched — 405 with Allow header
-        let allow = build_allow_header(self.allow_methods);
         ResponseBuilder::new()
             .status(StatusCode::METHOD_NOT_ALLOWED)
-            .header(http::header::ALLOW, allow)
+            .header(http::header::ALLOW, self.allow_header.as_ref())
             .text("Method Not Allowed")
     }
 
@@ -250,7 +303,9 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         MethodRouter {
             handlers,
             allow_methods: self.allow_methods,
+            allow_header: self.allow_header,
             layers: self.layers, // LayerFn is state-independent — pass through
+            compiled: None,
         }
     }
 }
@@ -264,7 +319,9 @@ impl<S: Clone + Send + Sync + 'static> Clone for MethodRouter<S> {
                 .map(|(f, h)| (*f, h.clone_box()))
                 .collect(),
             allow_methods: self.allow_methods,
+            allow_header: Arc::clone(&self.allow_header),
             layers: self.layers.clone(), // Arc — O(n) cheap clone
+            compiled: self.compiled.clone(),
         }
     }
 }

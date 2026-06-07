@@ -24,6 +24,7 @@ fi
 
 export AB_REQUESTS="${AB_REQUESTS:-100000}"
 export AB_CONNECTIONS="${AB_CONNECTIONS:-100}"
+export AB_KEEPALIVE="${AB_KEEPALIVE:-1}"
 export WRK_THREADS="${WRK_THREADS:-4}"
 export WRK_CONNECTIONS="${WRK_CONNECTIONS:-100}"
 export HEY_CONNECTIONS="${HEY_CONNECTIONS:-100}"
@@ -31,6 +32,7 @@ export H2LOAD_REQUESTS="${H2LOAD_REQUESTS:-10000}"
 export H2LOAD_CLIENTS="${H2LOAD_CLIENTS:-100}"
 export H2LOAD_STREAMS="${H2LOAD_STREAMS:-100}"
 export H2LOAD_THREADS="${H2LOAD_THREADS:-4}"
+bench_rustflags="${BENCH_RUSTFLAGS:-}"
 
 warmup_duration="${BENCH_WARMUP_DURATION:-5s}"
 current_pid=""
@@ -64,10 +66,21 @@ json_escape() {
 }
 
 json_number_or_null() {
-  if [ -n "${1:-}" ]; then
+  if [ -n "${1:-}" ] && [ "$1" != "-" ]; then
     printf '%s' "$1"
   else
     printf 'null'
+  fi
+}
+
+tool_version() {
+  local tool="$1"
+  shift
+
+  if command -v "$tool" >/dev/null 2>&1; then
+    "$tool" "$@" 2>&1 | head -n 1
+  else
+    printf '%s not installed\n' "$tool"
   fi
 }
 
@@ -89,10 +102,19 @@ record_result() {
   local p99="${15:-}"
   local raw="${16:-}"
   local note="${17:-}"
+  local fields=(
+    "$mode" "$scenario" "$tool" "$status" "$run_count" "$median_rps" "$min_rps" "$max_rps"
+    "$total_requests" "$failed_requests" "$avg_latency" "$p50" "$p90" "$p95" "$p99" "$raw" "$note"
+  )
+
+  for index in "${!fields[@]}"; do
+    if [ -z "${fields[$index]}" ]; then
+      fields[$index]="-"
+    fi
+  done
 
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$mode" "$scenario" "$tool" "$status" "$run_count" "$median_rps" "$min_rps" "$max_rps" \
-    "$total_requests" "$failed_requests" "$avg_latency" "$p50" "$p90" "$p95" "$p99" "$raw" "$note" \
+    "${fields[@]}" \
     >>"$summary_tsv"
 }
 
@@ -100,20 +122,29 @@ write_metadata() {
   {
     echo "profile=$profile"
     echo "runs=$runs"
+    echo "warmup_duration=$warmup_duration"
     echo "wrk_duration=$WRK_DURATION"
     echo "hey_duration=$HEY_DURATION"
     echo "ab_requests=$AB_REQUESTS"
     echo "ab_connections=$AB_CONNECTIONS"
+    echo "ab_keepalive=$AB_KEEPALIVE"
     echo "h2load_duration=$H2LOAD_DURATION"
     echo "h2load_requests=$H2LOAD_REQUESTS"
-    echo "commit=$(git rev-parse --short HEAD 2>/dev/null || true)"
+    echo "commit=$(git rev-parse HEAD 2>/dev/null || true)"
+    echo "commit_short=$(git rev-parse --short HEAD 2>/dev/null || true)"
+    echo "branch=$(git branch --show-current 2>/dev/null || true)"
     echo "rustc=$(rustc -V 2>/dev/null || true)"
     echo "kernel=$(uname -a 2>/dev/null || true)"
+    if [ -r /etc/os-release ]; then
+      . /etc/os-release
+      echo "os=${PRETTY_NAME:-}"
+    fi
     echo "build_profile=release"
-    echo "wrk=$({ wrk --version 2>&1 || true; } | head -n 1)"
-    echo "hey=$({ hey -version 2>&1 || true; } | head -n 1)"
-    echo "ab=$({ ab -V 2>&1 || true; } | head -n 1)"
-    echo "h2load=$({ h2load -v 2>&1 || true; } | head -n 1)"
+    echo "bench_rustflags=$bench_rustflags"
+    echo "wrk=$(tool_version wrk --version)"
+    echo "hey=$(tool_version hey -version)"
+    echo "ab=$(tool_version ab -V)"
+    echo "h2load=$(tool_version h2load -v)"
     if command -v lscpu >/dev/null 2>&1; then
       lscpu | sed -n 's/^\(Model name\|CPU(s)\|Thread(s) per core\|Core(s) per socket\|Socket(s)\): */cpu_\1=/p'
     fi
@@ -176,6 +207,34 @@ write_summary_files() {
   } >"$results_dir/summary.json"
 }
 
+write_comparison_artifacts() {
+  {
+    echo "# Arvik Before/After"
+    echo
+    echo "This artifact is generated for local before/after analysis. It records the current Arvik run from \`summary.tsv\`; attach a baseline run when publishing an engineering comparison."
+    echo
+    echo "| Scenario | Tool | Current median RPS | Current min RPS | Current max RPS | Runs |"
+    echo "| --- | --- | ---: | ---: | ---: | ---: |"
+    while IFS=$'\t' read -r mode scenario tool status run_count median_rps min_rps max_rps _total_requests _failed_requests _avg_latency _p50 _p90 _p95 _p99 _raw _note; do
+      [ "$status" = "ok" ] || continue
+      echo "| $scenario | $tool | $median_rps | $min_rps | $max_rps | $run_count |"
+    done <"$summary_tsv"
+  } >"$results_dir/before_after_arvik.md"
+
+  {
+    echo "# Cross-Framework Common Endpoints"
+    echo
+    echo "The in-repo runner executes Arvik scenarios. Axum and Actix baseline servers live under \`examples/benchmarks/baselines/\` and should be run separately with the same tool versions, duration, concurrency, and machine state."
+    echo
+    echo "Use these numbers only as engineering baselines. Do not turn cross-framework benchmark output into marketing claims."
+    echo
+    echo "| Endpoint | Framework | wrk RPS | wrk avg latency | hey RPS | hey avg latency | ab RPS | ab avg latency |"
+    echo "| --- | --- | ---: | --- | ---: | --- | ---: | --- |"
+    echo "| /plaintext | Arvik current run | see summary.md | see raw output | see summary.md | see raw output | see summary.md | see raw output |"
+    echo "| /json | Arvik current run | see summary.md | see raw output | see summary.md | see raw output | see summary.md | see raw output |"
+  } >"$results_dir/cross_framework_common_endpoints.md"
+}
+
 is_positive() {
   awk -v value="${1:-0}" 'BEGIN { exit !(value + 0 > 0) }'
 }
@@ -195,12 +254,17 @@ start_server() {
   local bin="$1"
   local label="$2"
   shift 2
+  local cargo_env=()
+
+  if [ -n "$bench_rustflags" ]; then
+    cargo_env=(RUSTFLAGS="$bench_rustflags")
+  fi
 
   cleanup_current_server
   assert_port_free
 
   current_log="$results_dir/${label}.server.log"
-  env "$@" cargo run --manifest-path "$manifest" --release --bin "$bin" >"$current_log" 2>&1 &
+  env "${cargo_env[@]}" "$@" cargo run --manifest-path "$manifest" --release --bin "$bin" >"$current_log" 2>&1 &
   current_pid="$!"
 }
 
@@ -624,13 +688,18 @@ run_h2c_plaintext() {
 build_benchmark_bins() {
   local bins=(plaintext json path_params middleware static_files)
   local bin
+  local cargo_env=()
+
+  if [ -n "$bench_rustflags" ]; then
+    cargo_env=(RUSTFLAGS="$bench_rustflags")
+  fi
 
   for bin in "${bins[@]}"; do
-    cargo build --manifest-path "$manifest" --release --bin "$bin"
+    env "${cargo_env[@]}" cargo build --manifest-path "$manifest" --release --bin "$bin"
   done
 
   if h2c_is_enabled; then
-    cargo build --manifest-path "$manifest" --release --bin h2c
+    env "${cargo_env[@]}" cargo build --manifest-path "$manifest" --release --bin h2c
   fi
 }
 
@@ -649,6 +718,7 @@ run_http1_target "static_files" "static_files" "/static/"
 run_h2c_plaintext
 
 write_summary_files
+write_comparison_artifacts
 
 echo "benchmark results written to $results_dir"
 

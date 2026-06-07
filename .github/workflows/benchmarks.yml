@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Use "smoke" for a quick 5s validation run or "manual" for artifact numbers.
+        description: Use "smoke" for a quick 10s validation run or "manual" for artifact numbers.
         required: true
         default: manual
         type: choice
@@ -64,8 +64,10 @@ jobs:
           echo "HEY_DURATION=$duration" >> "$GITHUB_ENV"
           echo "H2LOAD_DURATION=$duration" >> "$GITHUB_ENV"
           echo "H2LOAD_REQUESTS=${{ inputs.h2load_requests }}" >> "$GITHUB_ENV"
+          echo "BENCH_WARMUP_DURATION=5s" >> "$GITHUB_ENV"
           echo "AB_REQUESTS=100000" >> "$GITHUB_ENV"
           echo "AB_CONNECTIONS=100" >> "$GITHUB_ENV"
+          echo "AB_KEEPALIVE=1" >> "$GITHUB_ENV"
 
           if [ "${{ inputs.h2c_enabled }}" = "true" ]; then
             echo "BENCH_H2C=1" >> "$GITHUB_ENV"

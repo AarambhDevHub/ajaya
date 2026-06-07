@@ -1,4 +1,4 @@
-use arvik::{Json, Router, State, get, serve_app};
+use arvik::{Json, Router, RuntimeConfig, ServerConfig, State, get, serve_with_config};
 use serde::Serialize;
 
 #[derive(Clone)]
@@ -23,13 +23,14 @@ async fn single_query(State(db): State<BenchDb>) -> Json<Row> {
     })
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let state = BenchDb {
-        database_url: std::env::var("DATABASE_URL").ok(),
-    };
-    let app = Router::new()
-        .route("/db", get(single_query))
-        .with_state(state);
-    serve_app("0.0.0.0:8080", app).await
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    RuntimeConfig::benchmark_http1().build()?.block_on(async {
+        let state = BenchDb {
+            database_url: std::env::var("DATABASE_URL").ok(),
+        };
+        let app = Router::new()
+            .route("/db", get(single_query))
+            .with_state(state);
+        serve_with_config(app, "0.0.0.0:8080", ServerConfig::benchmark_http1()).await
+    })
 }

@@ -6,7 +6,7 @@
 //! behavior.
 
 #[cfg(feature = "fs")]
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
 use std::future::Future;
 #[cfg(feature = "embed")]
@@ -30,6 +30,8 @@ use tower_service::Service;
 const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
 #[cfg(feature = "fs")]
 const DEFAULT_SMALL_FILE_CACHE_LIMIT: usize = 64 * 1024;
+#[cfg(feature = "fs")]
+const DEFAULT_SMALL_FILE_CACHE_CAPACITY: usize = 8 * 1024 * 1024;
 const INDEX_FILE: &str = "index.html";
 
 type BoxFutureResponse = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send>>;
@@ -176,7 +178,13 @@ impl ServeDir {
         let accepts_gzip = self.precompressed_gzip && accepts_encoding(&req, "gzip");
 
         match self
-            .select_file(candidate, &relative.asset_path, accepts_br, accepts_gzip)
+            .select_file(
+                candidate,
+                &relative.asset_path,
+                accepts_br,
+                accepts_gzip,
+                Some(metadata),
+            )
             .await
         {
             Ok(asset) => {
@@ -209,33 +217,30 @@ impl ServeDir {
 
         if self.append_index_html_on_directories {
             let index_path = dir.join(INDEX_FILE);
-            if tokio::fs::metadata(&index_path)
-                .await
-                .map(|m| m.is_file())
-                .unwrap_or(false)
-            {
-                let index_asset_path = join_asset_path(&relative.asset_path, INDEX_FILE);
-                let accepts_br = self.precompressed_br && accepts_encoding(&req, "br");
-                let accepts_gzip = self.precompressed_gzip && accepts_encoding(&req, "gzip");
+            let index_asset_path = join_asset_path(&relative.asset_path, INDEX_FILE);
+            let accepts_br = self.precompressed_br && accepts_encoding(&req, "br");
+            let accepts_gzip = self.precompressed_gzip && accepts_encoding(&req, "gzip");
 
-                return match self
-                    .select_file(index_path, &index_asset_path, accepts_br, accepts_gzip)
-                    .await
-                {
-                    Ok(asset) => {
-                        serve_fs_asset(
-                            asset,
-                            req,
-                            false,
-                            self.chunk_size,
-                            self.cache_control.clone(),
-                            Arc::clone(&self.file_cache),
-                            self.small_file_cache_limit,
-                        )
-                        .await
-                    }
-                    Err(()) => self.call_fallback(req).await,
-                };
+            if let Ok(asset) = self
+                .select_file(
+                    index_path,
+                    &index_asset_path,
+                    accepts_br,
+                    accepts_gzip,
+                    None,
+                )
+                .await
+            {
+                return serve_fs_asset(
+                    asset,
+                    req,
+                    false,
+                    self.chunk_size,
+                    self.cache_control.clone(),
+                    Arc::clone(&self.file_cache),
+                    self.small_file_cache_limit,
+                )
+                .await;
             }
         }
 
@@ -252,6 +257,7 @@ impl ServeDir {
         asset_path: &str,
         accepts_br: bool,
         accepts_gzip: bool,
+        plain_metadata: Option<std::fs::Metadata>,
     ) -> Result<FsAsset, ()> {
         let content_type = content_type(asset_path);
 
@@ -285,7 +291,10 @@ impl ServeDir {
             }
         }
 
-        let metadata = tokio::fs::metadata(&path).await.map_err(|_| ())?;
+        let metadata = match plain_metadata {
+            Some(metadata) => metadata,
+            None => tokio::fs::metadata(&path).await.map_err(|_| ())?,
+        };
         if !metadata.is_file() {
             return Err(());
         }
@@ -782,9 +791,16 @@ async fn call_boxed(mut service: BoxCloneService, req: Request) -> Response {
 }
 
 #[cfg(feature = "fs")]
-#[derive(Default)]
 struct FileCache {
-    entries: Mutex<HashMap<PathBuf, CachedFile>>,
+    inner: Mutex<FileCacheInner>,
+}
+
+#[cfg(feature = "fs")]
+struct FileCacheInner {
+    entries: HashMap<PathBuf, CachedFile>,
+    lru: VecDeque<PathBuf>,
+    bytes: usize,
+    capacity: usize,
 }
 
 #[cfg(feature = "fs")]
@@ -797,22 +813,30 @@ struct CachedFile {
 #[cfg(feature = "fs")]
 impl FileCache {
     fn get_fresh(&self, path: &Path, len: u64, modified: Option<SystemTime>) -> Option<Bytes> {
-        let mut entries = self.entries.lock().ok()?;
-        let fresh = entries
+        let mut inner = self.inner.lock().ok()?;
+        let fresh = inner
+            .entries
             .get(path)
             .is_some_and(|entry| entry.len == len && entry.modified == modified);
 
         if fresh {
-            return entries.get(path).map(|entry| entry.bytes.clone());
+            touch_lru(&mut inner.lru, path);
+            return inner.entries.get(path).map(|entry| entry.bytes.clone());
         }
 
-        entries.remove(path);
+        remove_cached_entry(&mut inner, path);
         None
     }
 
     fn store(&self, path: PathBuf, len: u64, modified: Option<SystemTime>, bytes: Bytes) {
-        if let Ok(mut entries) = self.entries.lock() {
-            entries.insert(
+        if let Ok(mut inner) = self.inner.lock() {
+            if bytes.len() > inner.capacity {
+                return;
+            }
+            remove_cached_entry(&mut inner, &path);
+            inner.bytes += bytes.len();
+            inner.lru.push_back(path.clone());
+            inner.entries.insert(
                 path,
                 CachedFile {
                     len,
@@ -820,6 +844,72 @@ impl FileCache {
                     bytes,
                 },
             );
+            evict_lru(&mut inner);
+        }
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.inner
+            .lock()
+            .map(|inner| inner.entries.len())
+            .unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: Mutex::new(FileCacheInner {
+                entries: HashMap::new(),
+                lru: VecDeque::new(),
+                bytes: 0,
+                capacity,
+            }),
+        }
+    }
+}
+
+#[cfg(feature = "fs")]
+impl Default for FileCache {
+    fn default() -> Self {
+        Self {
+            inner: Mutex::new(FileCacheInner {
+                entries: HashMap::new(),
+                lru: VecDeque::new(),
+                bytes: 0,
+                capacity: DEFAULT_SMALL_FILE_CACHE_CAPACITY,
+            }),
+        }
+    }
+}
+
+#[cfg(feature = "fs")]
+fn touch_lru(lru: &mut VecDeque<PathBuf>, path: &Path) {
+    if let Some(index) = lru.iter().position(|candidate| candidate == path) {
+        if let Some(path) = lru.remove(index) {
+            lru.push_back(path);
+        }
+    }
+}
+
+#[cfg(feature = "fs")]
+fn remove_cached_entry(inner: &mut FileCacheInner, path: &Path) {
+    if let Some(entry) = inner.entries.remove(path) {
+        inner.bytes = inner.bytes.saturating_sub(entry.bytes.len());
+    }
+    if let Some(index) = inner.lru.iter().position(|candidate| candidate == path) {
+        inner.lru.remove(index);
+    }
+}
+
+#[cfg(feature = "fs")]
+fn evict_lru(inner: &mut FileCacheInner) {
+    while inner.bytes > inner.capacity {
+        let Some(path) = inner.lru.pop_front() else {
+            break;
+        };
+        if let Some(entry) = inner.entries.remove(&path) {
+            inner.bytes = inner.bytes.saturating_sub(entry.bytes.len());
         }
     }
 }
@@ -1519,6 +1609,25 @@ mod tests {
     }
 
     #[cfg(feature = "fs")]
+    #[test]
+    fn file_cache_evicts_least_recently_used_entry() {
+        let cache = FileCache::with_capacity(6);
+        let a = PathBuf::from("a.txt");
+        let b = PathBuf::from("b.txt");
+        let c = PathBuf::from("c.txt");
+
+        cache.store(a.clone(), 3, None, Bytes::from_static(b"aaa"));
+        cache.store(b.clone(), 3, None, Bytes::from_static(b"bbb"));
+        assert!(cache.get_fresh(&a, 3, None).is_some());
+        cache.store(c.clone(), 3, None, Bytes::from_static(b"ccc"));
+
+        assert!(cache.get_fresh(&a, 3, None).is_some());
+        assert!(cache.get_fresh(&b, 3, None).is_none());
+        assert!(cache.get_fresh(&c, 3, None).is_some());
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[cfg(feature = "fs")]
     #[tokio::test]
     async fn serve_file_body_mime_and_head() {
         let dir = tempfile::tempdir().unwrap();
@@ -1636,7 +1745,7 @@ mod tests {
         let mut service = ServeFile::new(&path).small_file_cache_limit(64);
         let res = service.call(request("/ignored")).await.unwrap();
         assert_eq!(body_text(res).await, "abcdef");
-        assert_eq!(service.file_cache.entries.lock().unwrap().len(), 1);
+        assert_eq!(service.file_cache.len(), 1);
 
         let req = Request::new(
             http::Request::builder()
@@ -1666,7 +1775,7 @@ mod tests {
 
         let res = service.call(request("/ignored")).await.unwrap();
         assert_eq!(body_text(res).await, "two");
-        assert_eq!(service.file_cache.entries.lock().unwrap().len(), 1);
+        assert_eq!(service.file_cache.len(), 1);
     }
 
     #[cfg(feature = "fs")]
@@ -1679,7 +1788,7 @@ mod tests {
         let mut service = ServeFile::new(&path).disable_file_cache();
         let res = service.call(request("/ignored")).await.unwrap();
         assert_eq!(body_text(res).await, "abcdef");
-        assert_eq!(service.file_cache.entries.lock().unwrap().len(), 0);
+        assert_eq!(service.file_cache.len(), 0);
     }
 
     #[cfg(feature = "fs")]
