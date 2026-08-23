@@ -27,6 +27,11 @@ pub struct ServerConfig {
     http1_title_case_headers: bool,
     http1_preserve_header_case: bool,
     http1_pipeline_flush: bool,
+    /// Upper bound on reading request headers (slowloris hardening).
+    http1_header_read_timeout: Option<Duration>,
+    http1_max_buf_size: Option<usize>,
+    /// Upper bound on the TLS handshake phase (`None` disables the guard).
+    handshake_timeout: Option<Duration>,
     http2_only: bool,
     http2_adaptive_window: bool,
     http2_initial_stream_window_size: Option<u32>,
@@ -58,6 +63,9 @@ impl Default for ServerConfig {
             http1_title_case_headers: false,
             http1_preserve_header_case: false,
             http1_pipeline_flush: false,
+            http1_header_read_timeout: None,
+            http1_max_buf_size: None,
+            handshake_timeout: Some(Duration::from_secs(10)),
             http2_only: false,
             http2_adaptive_window: true,
             http2_initial_stream_window_size: None,
@@ -311,6 +319,34 @@ impl ServerConfig {
         self
     }
 
+    /// Upper bound on reading request headers.
+    ///
+    /// Hardens against slow-loris clients that dribble headers forever
+    /// (hyper's own default is 30 s; `None` keeps that default).
+    #[must_use]
+    pub fn http1_header_read_timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
+        self.http1_header_read_timeout = timeout.into();
+        self
+    }
+
+    /// Cap the per-connection HTTP/1 read buffer size in bytes.
+    #[must_use]
+    pub fn http1_max_buf_size(mut self, size: usize) -> Self {
+        self.http1_max_buf_size = Some(size);
+        self
+    }
+
+    /// Upper bound on the TLS handshake phase (default 10 s).
+    ///
+    /// Clients that open a connection but never complete the handshake are
+    /// disconnected after this duration instead of holding a task and socket
+    /// indefinitely. Pass `None` to disable the guard entirely.
+    #[must_use]
+    pub fn handshake_timeout(mut self, timeout: impl Into<Option<Duration>>) -> Self {
+        self.handshake_timeout = timeout.into();
+        self
+    }
+
     /// Accept HTTP/2 prior-knowledge connections only.
     #[must_use]
     pub fn http2_only(mut self, enabled: bool) -> Self {
@@ -399,6 +435,19 @@ impl ServerConfig {
         self.http2_only
     }
 
+    pub(crate) fn http1_header_read_timeout_value(&self) -> Option<Duration> {
+        self.http1_header_read_timeout
+    }
+
+    pub(crate) fn http1_max_buf_size_value(&self) -> Option<usize> {
+        self.http1_max_buf_size
+    }
+
+    #[cfg_attr(not(any(feature = "tls", feature = "native-tls")), allow(dead_code))]
+    pub(crate) fn handshake_timeout_value(&self) -> Option<Duration> {
+        self.handshake_timeout
+    }
+
     pub(crate) fn needs_tuned_listener(&self) -> bool {
         self.reuse_port
             || self.reuse_address
@@ -418,6 +467,12 @@ impl ServerConfig {
             http1.title_case_headers(self.http1_title_case_headers);
             http1.preserve_header_case(self.http1_preserve_header_case);
             http1.pipeline_flush(self.http1_pipeline_flush);
+            if let Some(timeout) = self.http1_header_read_timeout_value() {
+                http1.header_read_timeout(timeout);
+            }
+            if let Some(size) = self.http1_max_buf_size_value() {
+                http1.max_buf_size(size);
+            }
             http1.timer(TokioTimer::new());
         }
 
@@ -511,5 +566,34 @@ mod tests {
         assert_eq!(high.tcp_nodelay_setting(), Some(true));
         assert_eq!(high.http2_max_concurrent_streams, Some(2_000));
         assert_eq!(high.http2_initial_connection_window_size, Some(8_388_608));
+    }
+
+    #[test]
+    fn handshake_and_http1_timeout_knobs() {
+        // Defaults: 10 s handshake guard, hyper defaults for HTTP/1 knobs.
+        let config = ServerConfig::new();
+        assert_eq!(
+            config.handshake_timeout_value(),
+            Some(Duration::from_secs(10))
+        );
+        assert_eq!(config.http1_header_read_timeout_value(), None);
+        assert_eq!(config.http1_max_buf_size_value(), None);
+
+        let tuned = ServerConfig::new()
+            .handshake_timeout(Duration::from_secs(3))
+            .http1_header_read_timeout(Duration::from_secs(15))
+            .http1_max_buf_size(64 * 1024);
+        assert_eq!(
+            tuned.handshake_timeout_value(),
+            Some(Duration::from_secs(3))
+        );
+        assert_eq!(
+            tuned.http1_header_read_timeout_value(),
+            Some(Duration::from_secs(15))
+        );
+        assert_eq!(tuned.http1_max_buf_size_value(), Some(64 * 1024));
+
+        let disabled = ServerConfig::new().handshake_timeout(None);
+        assert_eq!(disabled.handshake_timeout_value(), None);
     }
 }
