@@ -107,6 +107,76 @@ impl ArvikLoggerBuilder {
                 .try_init(),
             LogFormat::Auto => unreachable!("LogFormat::resolve never returns Auto"),
         }
+        .map_err(Into::into)
+    }
+
+    /// Install logging and OpenTelemetry as **one** subscriber.
+    ///
+    /// [`ArvikLogger::init`] and [`OtelConfig::install`](crate::trace::OtelConfig::install)
+    /// each try to claim the global subscriber, so calling both always fails
+    /// for whichever runs second. This method composes the log layer and the
+    /// OTel span layer into a single subscriber instead. The returned guard
+    /// shuts the tracer provider down on drop; on failure nothing is left
+    /// installed.
+    #[cfg(all(feature = "logging", feature = "opentelemetry"))]
+    pub fn init_with_otel(
+        self,
+        otel: crate::trace::OtelConfig,
+    ) -> Result<crate::trace::OtelGuard, LoggerError> {
+        use opentelemetry::global;
+        use opentelemetry::trace::TracerProvider as _;
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        let provider = otel
+            .build_provider()
+            .map_err(|err| -> LoggerError { Box::new(err) })?;
+
+        let format = self.format.resolve();
+        let env_filter = EnvFilter::try_new(self.env_filter_directive())?;
+
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_target(self.with_target)
+            .with_thread_ids(self.with_thread_ids);
+
+        // The Json/Pretty layers have distinct types, so each arm composes and
+        // installs its own subscriber.
+        let install_result = match format {
+            LogFormat::Json => {
+                let otel_layer = tracing_opentelemetry::layer()
+                    .with_tracer(provider.tracer(otel.service_name().to_string()));
+                tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(fmt_layer.json())
+                    .with(otel_layer)
+                    .try_init()
+            }
+            LogFormat::Pretty => {
+                let otel_layer = tracing_opentelemetry::layer()
+                    .with_tracer(provider.tracer(otel.service_name().to_string()));
+                tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(fmt_layer.pretty())
+                    .with(otel_layer)
+                    .try_init()
+            }
+            LogFormat::Auto => unreachable!("LogFormat::resolve never returns Auto"),
+        };
+
+        if let Err(err) = install_result {
+            // Mirror OtelConfig::install's failure hygiene: release exporter
+            // threads and drop the global reference before surfacing the error.
+            let _ = provider.shutdown();
+            global::set_tracer_provider(
+                opentelemetry_sdk::trace::SdkTracerProvider::builder().build(),
+            );
+            return Err(Box::new(crate::trace::OtelError::Subscriber(
+                err.to_string(),
+            )));
+        }
+
+        global::set_tracer_provider(provider.clone());
+        Ok(crate::trace::OtelGuard::from_provider(provider))
     }
 
     fn env_filter_directive(&self) -> String {

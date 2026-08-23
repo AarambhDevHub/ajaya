@@ -779,10 +779,21 @@ impl ConfigWatcher {
         })
         .map_err(|err| ConfigError::Watch(err.to_string()))?;
 
+        // Watch the parent *directories*, not the files themselves: editors
+        // and deploy tooling replace configs via temp-file+rename, which
+        // silently orphans an inode watch. Reloads read by path, so they pick
+        // up the replacement on the next event regardless.
+        let mut watched_dirs = std::collections::HashSet::new();
         for file in &builder.files {
-            watcher
-                .watch(file, notify::RecursiveMode::NonRecursive)
-                .map_err(|err| ConfigError::Watch(err.to_string()))?;
+            let dir = match file.parent() {
+                Some(dir) => dir.to_path_buf(),
+                None => continue,
+            };
+            if watched_dirs.insert(dir.clone()) {
+                watcher
+                    .watch(&dir, notify::RecursiveMode::NonRecursive)
+                    .map_err(|err| ConfigError::Watch(err.to_string()))?;
+            }
         }
 
         let current_task = std::sync::Arc::clone(&current);
@@ -794,7 +805,13 @@ impl ConfigWatcher {
                 }
 
                 tokio::time::sleep(Duration::from_millis(200)).await;
-                while event_rx.try_recv().is_ok() {}
+                // Coalesce bursts of events, but forward any watcher errors
+                // that arrived during the debounce window instead of dropping.
+                while let Ok(pending) = event_rx.try_recv() {
+                    if let Err(err) = pending {
+                        let _ = update_tx.send(Err(ConfigError::Watch(err.to_string())));
+                    }
+                }
 
                 match builder.build_inner() {
                     Ok(config) => {

@@ -262,16 +262,38 @@ impl OtelConfig {
         }
     }
 
+    /// Return the configured service name.
+    pub fn service_name(&self) -> &str {
+        &self.service_name
+    }
+
     /// Install the tracer provider and a `tracing-opentelemetry` subscriber layer.
+    ///
+    /// The global subscriber is installed first; if that fails (typically
+    /// because another subscriber — e.g. [`crate::logging::ArvikLogger`] — is
+    /// already installed), the freshly built provider is shut down and the
+    /// global reference released instead of leaking its exporter task.
+    ///
+    /// To combine structured logging with OpenTelemetry in one subscriber,
+    /// use [`crate::logging::ArvikLogger::init_with_otel`].
     pub fn install(self) -> Result<OtelGuard, OtelError> {
         let provider = self.build_provider()?;
         let tracer = provider.tracer(self.service_name.clone());
-        global::set_tracer_provider(provider.clone());
 
-        tracing_subscriber::registry()
+        let install_result = tracing_subscriber::registry()
             .with(tracing_opentelemetry::layer().with_tracer(tracer))
-            .try_init()
-            .map_err(|err| OtelError::Subscriber(err.to_string()))?;
+            .try_init();
+
+        if let Err(err) = install_result {
+            // Stop exporter threads, then overwrite the global reference so
+            // nothing keeps the provider alive for the rest of the process.
+            let _ = provider.shutdown();
+            global::set_tracer_provider(SdkTracerProvider::builder().build());
+            return Err(OtelError::Subscriber(err.to_string()));
+        }
+
+        // Only publish globally once installation actually succeeded.
+        global::set_tracer_provider(provider.clone());
 
         Ok(OtelGuard {
             provider: Some(provider),
@@ -282,6 +304,15 @@ impl OtelConfig {
 /// Guard that shuts down the installed OpenTelemetry tracer provider.
 pub struct OtelGuard {
     provider: Option<SdkTracerProvider>,
+}
+
+impl OtelGuard {
+    /// Wrap an externally built provider so its lifetime is managed here.
+    pub(crate) fn from_provider(provider: SdkTracerProvider) -> Self {
+        Self {
+            provider: Some(provider),
+        }
+    }
 }
 
 impl OtelGuard {

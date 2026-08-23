@@ -117,6 +117,13 @@ where
             match handle.await {
                 Ok(Ok(response)) => Ok(response),
                 Ok(Err(infallible)) => match infallible {},
+                // Only actual panics are recovered; task *cancellation* (e.g.
+                // runtime shutdown while requests are in flight) must not be
+                // turned back into a panic by this middleware.
+                Err(join_error) if !join_error.is_panic() => {
+                    tracing::debug!("Request task cancelled before completion");
+                    Ok(default_panic_response())
+                }
                 Err(join_error) => {
                     let panic_payload = join_error.into_panic();
 

@@ -21,7 +21,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use tokio::net::{TcpListener, TcpStream, lookup_host};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tower_service::Service as _;
 
@@ -311,6 +311,7 @@ impl Server {
         let mut accept_workers = spawn_accept_workers(self.listeners);
         let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
+        let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(());
 
         loop {
             tokio::select! {
@@ -318,6 +319,9 @@ impl Server {
 
                 _ = &mut signal => {
                     tracing::info!("Shutdown signal received; stopping listener on {}", self.addr);
+                    // Tell every established connection to finish its current
+                    // request and close instead of serving new ones.
+                    let _ = conn_shutdown_tx.send(());
                     break;
                 }
                 joined = connections.join_next(), if !connections.is_empty() => {
@@ -350,9 +354,10 @@ impl Server {
                     tracing::debug!("Accepted connection from {}", peer_addr);
                     shutdown_config.call_connected(info);
 
+                    let shutdown_rx = conn_shutdown_rx.clone();
                     connections.spawn(async move {
                         let _guard = ConnectionGuard::new(active, shutdown_config, info);
-                        run_connection(io, service, config, peer_addr).await;
+                        run_connection(io, service, config, peer_addr, shutdown_rx).await;
                     });
                 }
             }
@@ -383,6 +388,7 @@ impl Server {
         let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
         let handshake_timeout = self.config.handshake_timeout_value();
+        let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(());
 
         loop {
             tokio::select! {
@@ -390,6 +396,9 @@ impl Server {
 
                 _ = &mut signal => {
                     tracing::info!("Shutdown signal received; stopping TLS listener on {}", self.addr);
+                    // Tell every established connection to finish its current
+                    // request and close instead of serving new ones.
+                    let _ = conn_shutdown_tx.send(());
                     break;
                 }
                 joined = connections.join_next(), if !connections.is_empty() => {
@@ -422,12 +431,13 @@ impl Server {
                     tracing::debug!("Accepted TLS connection from {}", peer_addr);
                     shutdown_config.call_connected(info);
 
+                    let shutdown_rx = conn_shutdown_rx.clone();
                     connections.spawn(async move {
                         let _guard = ConnectionGuard::new(active, shutdown_config, info);
                         let handshake = async {
                             match tls_config.accept(stream).await {
                                 Ok(tls_stream) => {
-                                    run_connection(TokioIo::new(tls_stream), service, config, peer_addr).await;
+                                    run_connection(TokioIo::new(tls_stream), service, config, peer_addr, shutdown_rx).await;
                                 }
                                 Err(err) => tracing::warn!("TLS handshake failed from {}: {}", peer_addr, err),
                             }
@@ -513,12 +523,13 @@ impl Server {
                     tracing::debug!("Accepted native-tls connection from {}", peer_addr);
                     shutdown_config.call_connected(info);
 
+                    let shutdown_rx = conn_shutdown_rx.clone();
                     connections.spawn(async move {
                         let _guard = ConnectionGuard::new(active, shutdown_config, info);
                         let handshake = async {
                             match tls_config.accept(stream).await {
                                 Ok(tls_stream) => {
-                                    run_connection(TokioIo::new(tls_stream), service, config, peer_addr).await;
+                                    run_connection(TokioIo::new(tls_stream), service, config, peer_addr, shutdown_rx).await;
                                 }
                                 Err(err) => {
                                     tracing::warn!("native-tls handshake failed from {}: {}", peer_addr, err)
@@ -879,6 +890,7 @@ async fn run_connection<I>(
     service: BoxCloneService,
     config: ServerConfig,
     peer_addr: SocketAddr,
+    mut shutdown_rx: watch::Receiver<()>,
 ) where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
@@ -896,10 +908,36 @@ async fn run_connection<I>(
     });
 
     let builder = config.auto_builder();
+
+    // Serve requests until shutdown is signalled. On signal, tell hyper to
+    // stop taking NEW requests: idle keep-alive connections close immediately
+    // and in-flight responses are allowed to finish — instead of serving new
+    // requests for the whole drain window and then being hard-aborted.
+    //
+    // The plain and upgrade-capable connections are distinct types, so each
+    // branch runs its own shutdown-aware select.
     let result = if config.is_http2_only() {
-        builder.serve_connection(io, hyper_svc).await
+        let conn = builder.serve_connection(io, hyper_svc);
+        tokio::pin!(conn);
+        tokio::select! {
+            biased;
+            res = &mut conn => res,
+            _ = shutdown_rx.changed() => {
+                conn.as_mut().graceful_shutdown();
+                (&mut conn).await
+            }
+        }
     } else {
-        builder.serve_connection_with_upgrades(io, hyper_svc).await
+        let conn = builder.serve_connection_with_upgrades(io, hyper_svc);
+        tokio::pin!(conn);
+        tokio::select! {
+            biased;
+            res = &mut conn => res,
+            _ = shutdown_rx.changed() => {
+                conn.as_mut().graceful_shutdown();
+                (&mut conn).await
+            }
+        }
     };
 
     if let Err(err) = result {
