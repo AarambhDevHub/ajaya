@@ -232,6 +232,16 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
             .text("Method Not Allowed")
     }
 
+    /// Append already-erased layers to this router's per-route stack.
+    ///
+    /// Used by [`crate::Router::nest`] / [`crate::Router::merge`] to preserve
+    /// middleware attached inside a sub-router when its routes are flattened
+    /// into the parent: appended layers wrap the ones registered earlier,
+    /// matching the router-level (`layer` outside `route_layer`) ordering.
+    pub(crate) fn extend_layers(&mut self, extra: impl IntoIterator<Item = LayerFn>) {
+        self.layers.extend(extra);
+    }
+
     /// Bind application state, converting `MethodRouter<S>` → `MethodRouter<()>`.
     ///
     /// After calling this, the method router is ready to be served directly

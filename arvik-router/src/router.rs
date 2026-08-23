@@ -224,8 +224,32 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     }
 
     /// Mount a sub-router under a path prefix (flatten strategy).
+    ///
+    /// Middleware attached to the sub-router (`.layer()` / `.route_layer()`)
+    /// is preserved by folding it onto each flattened route. Note the
+    /// flattening caveat: those layers run only on **matched** sub-router
+    /// routes — unmatched paths in the prefix fall through to this router's
+    /// fallback, like any other unmatched path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the sub-router has its own `.fallback()`: flattened routing
+    /// cannot scope a fallback to the prefix. Set `.fallback()` on the outer
+    /// router instead.
     pub fn nest(mut self, prefix: &str, other: Router<S>) -> Self {
         let prefix = prefix.trim_end_matches('/');
+        if other.fallback.is_some() {
+            panic!(
+                "nest(\"{prefix}\"): the sub-router has a `.fallback()`, which cannot be \
+                 scoped under a prefix when routes are flattened. Set `.fallback()` on the \
+                 outer router instead."
+            );
+        }
+        // Preserve middleware attached inside the sub-router by folding it
+        // onto every flattened route's method-router layer stack:
+        // handler ← method layers ← sub route_layers ← sub layers.
+        let mut sub_layers = other.route_layers;
+        sub_layers.extend(other.layers);
         for entry in other.routes {
             let path = entry.pattern.as_ref();
             let full = if path == "/" {
@@ -237,20 +261,31 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
             if let Err(e) = self.trie.insert(&full, idx) {
                 panic!("Nested route conflict for `{full}`: {e}");
             }
-            self.routes
-                .push(RouteEntry::new(&full, entry.method_router));
+            let mut method_router = entry.method_router;
+            method_router.extend_layers(sub_layers.iter().cloned());
+            self.routes.push(RouteEntry::new(&full, method_router));
         }
         self
     }
 
     /// Merge all routes from another router into this one.
+    ///
+    /// Middleware attached to the merged router is preserved by folding it
+    /// onto each merged route; a merged `.fallback()` is adopted when this
+    /// router has none.
     pub fn merge(mut self, other: Router<S>) -> Self {
+        let mut sub_layers = other.route_layers;
+        sub_layers.extend(other.layers);
         for entry in other.routes {
             let path = entry.pattern.as_ref();
             let idx = self.routes.len();
             if let Err(e) = self.trie.insert(path, idx) {
                 panic!("Merge conflict for `{path}`: {e}");
             }
+            let mut entry = entry;
+            entry
+                .method_router
+                .extend_layers(sub_layers.iter().cloned());
             self.routes.push(entry);
         }
         if self.fallback.is_none() {
@@ -900,5 +935,133 @@ mod tests {
         let a = Router::new().route("/users", crate::get(h));
         let b = Router::new().route("/users", crate::get(h));
         let _: Router<()> = a.merge(b);
+    }
+
+    // ── nest/merge middleware preservation (audit H3) ────────────────────────
+
+    /// Layer that appends its tag to the `x-mark` response header.
+    #[derive(Clone)]
+    struct MarkLayer(&'static str);
+
+    impl Layer<BoxCloneService> for MarkLayer {
+        type Service = MarkService;
+
+        fn layer(&self, inner: BoxCloneService) -> Self::Service {
+            MarkService { inner, tag: self.0 }
+        }
+    }
+
+    #[derive(Clone)]
+    struct MarkService {
+        inner: BoxCloneService,
+        tag: &'static str,
+    }
+
+    impl Service<Request> for MarkService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: Request) -> Self::Future {
+            let cloned = self.inner.clone();
+            let mut inner = std::mem::replace(&mut self.inner, cloned);
+            let value = self.tag.parse().unwrap();
+            Box::pin(async move {
+                let mut res = inner
+                    .call(req)
+                    .await
+                    .unwrap_or_else(|infallible| match infallible {});
+                res.headers_mut().append("x-mark", value);
+                Ok(res)
+            })
+        }
+    }
+
+    async fn marked_handler() -> &'static str {
+        "inner"
+    }
+
+    fn get_req(path: &str) -> Request {
+        Request::new(
+            http::Request::builder()
+                .method(http::Method::GET)
+                .uri(path)
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn nest_preserves_subrouter_layers_and_route_layers() {
+        let sub = Router::new()
+            .route("/inner", crate::get(marked_handler))
+            .route_layer(MarkLayer("route"))
+            .layer(MarkLayer("wide"));
+        let app: Router<()> = Router::new().nest("/sub", sub);
+
+        // Matched nested route carries both sub-router layers (outer first).
+        let res = app.call(get_req("/sub/inner"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let marks: Vec<_> = res
+            .headers()
+            .get_all("x-mark")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
+        assert_eq!(marks, vec!["route", "wide"]);
+    }
+
+    #[tokio::test]
+    async fn nested_layers_do_not_leak_outside_the_prefix_or_to_unmatched_paths() {
+        async fn outer_handler() -> &'static str {
+            "outer"
+        }
+        let sub = Router::new()
+            .route("/inner", crate::get(marked_handler))
+            .layer(MarkLayer("sub"));
+        let app: Router<()> = Router::new()
+            .route("/own", crate::get(outer_handler))
+            .nest("/sub", sub);
+
+        // Parent's own route is untouched by sub-router layers.
+        let res = app.call(get_req("/own"), ()).await;
+        assert!(res.headers().get("x-mark").is_none());
+
+        // Unmatched path under the prefix: no sub-router layer runs (404).
+        let res = app.call(get_req("/sub/missing"), ()).await;
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        assert!(res.headers().get("x-mark").is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot be scoped")]
+    fn nest_rejects_subrouter_fallback_instead_of_dropping_it() {
+        async fn h() -> &'static str {
+            "ok"
+        }
+        let sub: Router<()> = Router::new().route("/inner", crate::get(h)).fallback(h);
+        let _: Router<()> = Router::new().nest("/sub", sub);
+    }
+
+    #[tokio::test]
+    async fn merge_preserves_merged_router_layers() {
+        let sub = Router::new()
+            .route("/a", crate::get(marked_handler))
+            .route_layer(MarkLayer("merged"));
+        let app: Router<()> = Router::new().merge(sub);
+
+        let res = app.call(get_req("/a"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let marks: Vec<&str> = res
+            .headers()
+            .get_all("x-mark")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
+        assert_eq!(marks, vec!["merged"]);
     }
 }
