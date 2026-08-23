@@ -52,6 +52,12 @@
 //!   .on_upgrade(handler)
 //! ```
 
+// `tungstenite::Error` is this crate's public error contract, returned by
+// value from every socket operation. It exceeds clippy's result_large_err
+// threshold on newer toolchains; boxing it would allocate on each call and
+// break the API. The large-variant cases are rare runtime failures.
+#![allow(clippy::result_large_err)]
+
 pub mod message;
 pub mod rejection;
 pub mod socket;
