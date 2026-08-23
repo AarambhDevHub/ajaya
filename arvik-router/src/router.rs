@@ -660,6 +660,14 @@ fn extract_param_names(path: &str) -> Vec<Arc<str>> {
 }
 
 /// Percent-decode a URL path segment in-place (ASCII-only fast path).
+/// Percent-decode a URL path segment (ASCII-only fast path).
+///
+/// Decoding happens *after* route matching, so decoded values are handed to
+/// handlers verbatim. Sequences that would change segment structure or smuggle
+/// control characters are therefore kept encoded: `%2F` (`/`) and `%5C` (`\`)
+/// cannot introduce separators into captured params, and `%00`, `%0A`, `%0D`
+/// stay escaped so NUL/CRLF cannot reach handlers, filesystems, or logs
+/// through decoded values. Literal separators in the URL are unaffected.
 fn percent_decode(input: &str) -> String {
     let bytes = input.as_bytes();
     if !bytes.contains(&b'%') {
@@ -670,7 +678,13 @@ fn percent_decode(input: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             if let (Some(hi), Some(lo)) = (hex_nibble(bytes[i + 1]), hex_nibble(bytes[i + 2])) {
-                out.push(hi << 4 | lo);
+                let decoded = hi << 4 | lo;
+                if matches!(decoded, b'/' | b'\\' | 0x00 | b'\n' | b'\r') {
+                    // Preserve the escape — see doc comment.
+                    out.extend_from_slice(&bytes[i..i + 3]);
+                } else {
+                    out.push(decoded);
+                }
                 i += 3;
                 continue;
             }
@@ -700,9 +714,23 @@ mod tests {
     #[test]
     fn test_percent_decode() {
         assert_eq!(percent_decode("hello%20world"), "hello world");
-        assert_eq!(percent_decode("foo%2Fbar"), "foo/bar");
         assert_eq!(percent_decode("normal"), "normal");
         assert_eq!(percent_decode("100%25"), "100%");
+    }
+
+    #[test]
+    fn percent_decode_keeps_structure_changing_escapes_encoded() {
+        // Encoded separators must not become real separators post-match.
+        assert_eq!(percent_decode("foo%2Fbar"), "foo%2Fbar");
+        assert_eq!(percent_decode("a%5Cb"), "a%5Cb");
+        // Control characters stay escaped.
+        assert_eq!(percent_decode("a%00b"), "a%00b");
+        assert_eq!(percent_decode("a%0d%0Ab"), "a%0d%0Ab");
+        // Ordinary decodes still work.
+        assert_eq!(percent_decode("a%2Eb"), "a.b");
+        assert_eq!(percent_decode("%e2%82%ac"), "\u{20ac}");
+        // Invalid UTF-8 falls back to the input unchanged.
+        assert_eq!(percent_decode("%ff"), "%ff");
     }
 
     #[test]
