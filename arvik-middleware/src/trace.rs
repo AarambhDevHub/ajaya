@@ -95,6 +95,21 @@ impl DefaultMakeSpan {
     }
 
     fn make_span(&self, req: &Request) -> Span {
+        // Fast path: when this span's level is filtered out by the active
+        // subscriber (e.g. RUST_LOG=off), skip all per-request field
+        // construction — previously every filtered request still paid several
+        // String allocations before landing on a no-op span.
+        let span_enabled = match self.level {
+            Level::ERROR => tracing::enabled!(Level::ERROR),
+            Level::WARN => tracing::enabled!(Level::WARN),
+            Level::INFO => tracing::enabled!(Level::INFO),
+            Level::DEBUG => tracing::enabled!(Level::DEBUG),
+            _ => tracing::enabled!(Level::TRACE),
+        };
+        if !span_enabled {
+            return Span::none();
+        }
+
         let method = req.method().as_str().to_owned();
         let path = req.uri().path().to_owned();
         let version = format!("{:?}", req.version());
