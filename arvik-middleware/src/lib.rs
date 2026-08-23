@@ -22,10 +22,10 @@
 //!
 //! | Layer | Description | Version |
 //! |---|---|---|
-//! | [`from_fn`] | Middleware from async fn with extractor support | ✅ 0.4.1 |
+//! | [from_fn()](crate::from_fn()) | Middleware from async fn with extractor support | ✅ 0.4.1 |
 //! | [`from_fn_with_state`] | Same, with router state access | ✅ 0.4.1 |
-//! | [`map_request`] | Transform request only | ✅ 0.4.1 |
-//! | [`map_response`] | Transform response only | ✅ 0.4.1 |
+//! | [map_request()](crate::map_request()) | Transform request only | ✅ 0.4.1 |
+//! | [map_response()](crate::map_response()) | Transform response only | ✅ 0.4.1 |
 //! | [`cors::CorsLayer`] | Full CORS spec | ✅ 0.4.1 |
 //! | [`compression::CompressionLayer`] | gzip / br / zstd / deflate | ✅ 0.4.2 |
 //! | [`compression::DecompressionLayer`] | Decompress request bodies | ✅ 0.4.2 |

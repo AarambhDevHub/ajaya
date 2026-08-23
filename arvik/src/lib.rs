@@ -307,14 +307,14 @@ pub use arvik_static::{ServeDir, ServeFile};
 ///
 /// | Function | Use case |
 /// |---|---|
-/// | [`from_fn`] | Middleware with extractors, no shared state |
-/// | [`from_fn_with_state`] | Middleware with extractors + shared app state |
-/// | [`map_request`] | Transform the incoming request only |
-/// | [`map_request_with_state`] | Transform request with state access |
-/// | [`map_response`] | Transform the outgoing response only |
-/// | [`map_response_with_state`] | Transform response with state access |
+/// | `from_fn` | Middleware with extractors, no shared state |
+/// | `from_fn_with_state` | Middleware with extractors + shared app state |
+/// | `map_request` | Transform the incoming request only |
+/// | `map_request_with_state` | Transform request with state access |
+/// | `map_response` | Transform the outgoing response only |
+/// | `map_response_with_state` | Transform response with state access |
 ///
-/// See [`arvik_middleware::from_fn`] for detailed documentation and examples.
+/// See [`arvik_middleware::from_fn()`] for detailed documentation and examples.
 pub mod middleware {
     pub use arvik_middleware::{
         auth::RequireAuthorizationLayer,

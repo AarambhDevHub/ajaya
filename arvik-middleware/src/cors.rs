@@ -283,7 +283,7 @@ fn assert_credentials_safe(cfg: &CorsConfig) {
 
 // ── IntoAllowOrigin conversions ───────────────────────────────────────────────
 
-/// Types that can be converted into an [`AllowOrigin`] configuration.
+/// Types that can be converted into an `AllowOrigin` configuration.
 pub trait IntoAllowOrigin: sealed::Sealed {
     #[doc(hidden)]
     #[allow(private_interfaces)]

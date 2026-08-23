@@ -107,7 +107,8 @@ impl ArvikLoggerBuilder {
                 .try_init(),
             LogFormat::Auto => unreachable!("LogFormat::resolve never returns Auto"),
         }
-        .map_err(Into::into)
+        // try_init already returns our exact LoggerError box type.
+        .map_err(|err| err as LoggerError)
     }
 
     /// Install logging and OpenTelemetry as **one** subscriber.

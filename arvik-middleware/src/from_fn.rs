@@ -2,7 +2,7 @@
 //!
 //! Tower [`Layer`] and [`Service`] produced by [`from_fn`] and [`from_fn_with_state`].
 //!
-//! Apply it to a [`Router`] via `.layer(from_fn(my_fn))`.
+//! Apply it to a `Router` via `.layer(from_fn(my_fn))`.
 //! You typically do not interact with these types directly.
 
 use std::marker::PhantomData;
@@ -19,7 +19,7 @@ use tower_service::Service;
 
 /// Create a Tower middleware layer from a plain async function.
 ///
-/// The function may accept any number of [`FromRequestParts`] extractors
+/// The function may accept any number of `FromRequestParts` extractors
 /// as leading parameters, followed by `Request` and `Next`:
 ///
 /// ```text
@@ -27,12 +27,12 @@ use tower_service::Service;
 /// ```
 ///
 /// All extractors that work with state `()` are available without any
-/// additional setup: [`Method`], [`Uri`], [`Version`], [`HeaderMap`],
-/// [`Path<T>`], [`Query<T>`], [`MatchedPath`], [`RawPathParams`],
-/// [`ConnectInfo<T>`], [`Extension<T>`], [`TypedHeader<T>`], [`CookieJar`].
+/// additional setup: `Method`, `Uri`, `Version`, `HeaderMap`,
+/// `Path<T>`, `Query<T>`, `MatchedPath`, `RawPathParams`,
+/// `ConnectInfo<T>`, `Extension<T>`, `TypedHeader<T>`, `CookieJar`.
 ///
-/// For extractors that need shared application state — [`State<S>`],
-/// [`SignedCookieJar`], [`PrivateCookieJar`] — use [`from_fn_with_state`].
+/// For extractors that need shared application state — `State<S>`,
+/// `SignedCookieJar`, `PrivateCookieJar` — use [`from_fn_with_state`].
 ///
 /// ### Examples
 ///
@@ -101,13 +101,13 @@ where
 /// Create a Tower middleware layer from an async function that has access to
 /// shared application state through extractors.
 ///
-/// The `state` provided here is used to resolve [`FromRequestParts<S>`]
-/// extractors inside the middleware function — just as [`Router::with_state`]
+/// The `state` provided here is used to resolve `FromRequestParts<S>`
+/// extractors inside the middleware function — just as `Router::with_state`
 /// provides state to handlers.
 ///
 /// **Pass the same state object here as you pass to `.with_state()`** so
-/// extractors like [`State<AppState>`], [`SignedCookieJar`], and
-/// [`PrivateCookieJar`] work correctly.
+/// extractors like `State<AppState>`, `SignedCookieJar`, and
+/// `PrivateCookieJar` work correctly.
 ///
 /// ### Signature
 ///
@@ -216,7 +216,7 @@ where
 
 /// Tower [`Layer`] produced by [`from_fn`] or [`from_fn_with_state`].
 ///
-/// Apply it to a [`Router`] via `.layer(from_fn(my_fn))`.
+/// Apply it to a `Router` via `.layer(from_fn(my_fn))`.
 /// You typically do not interact with this type directly.
 pub struct FromFnLayer<F, S, T> {
     f: F,

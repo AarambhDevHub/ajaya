@@ -3,7 +3,7 @@
 //! Request extractors for the Arvik web framework.
 //!
 //! This crate provides all built-in extractors that implement
-//! [`FromRequestParts`] and [`FromRequest`] from `arvik-core`:
+//! `FromRequestParts` and `FromRequest` from `arvik-core`:
 //!
 //! ## Parts-Only Extractors (`FromRequestParts`)
 //!

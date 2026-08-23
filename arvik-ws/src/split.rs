@@ -102,7 +102,7 @@ impl<S> std::fmt::Debug for Sender<S> {
 ///
 /// `Ping` frames received here are surfaced as [`Message::Ping`] so that
 /// your receive task can forward them to the `Sender` for an explicit pong.
-/// Unlike [`WebSocket::recv`], the split `Receiver` does **not** auto-pong
+/// Unlike `WebSocket::recv`, the split `Receiver` does **not** auto-pong
 /// (there is no access to the sink half to do so). Handle them manually:
 ///
 /// ```rust,ignore

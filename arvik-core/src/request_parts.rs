@@ -2,7 +2,7 @@
 //!
 //! [`RequestParts`] combines the standard HTTP request parts with
 //! framework-specific extensions. This is the input type for
-//! [`FromRequestParts`] extractors that need access to headers,
+//! `FromRequestParts` extractors that need access to headers,
 //! URI, method, and framework extensions without consuming the body.
 
 use http::Extensions;

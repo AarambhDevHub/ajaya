@@ -288,7 +288,7 @@ impl OtelConfig {
     /// global reference released instead of leaking its exporter task.
     ///
     /// To combine structured logging with OpenTelemetry in one subscriber,
-    /// use [`crate::logging::ArvikLogger::init_with_otel`].
+    /// use `crate::logging::ArvikLogger::init_with_otel`.
     pub fn install(self) -> Result<OtelGuard, OtelError> {
         let provider = self.build_provider()?;
         let tracer = provider.tracer(self.service_name.clone());

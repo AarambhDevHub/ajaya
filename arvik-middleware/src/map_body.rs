@@ -3,7 +3,7 @@
 //! [`MapRequestBodyLayer`] transforms the request body before it reaches the handler.
 //! [`MapResponseBodyLayer`] transforms the response body after the handler runs.
 //!
-//! These are lower-level than [`map_request`]/[`map_response`] — they operate
+//! These are lower-level than `map_request`/`map_response` — they operate
 //! on the raw body bytes rather than the full request/response.
 //!
 //! # Example

@@ -488,6 +488,7 @@ impl Server {
         let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
         let handshake_timeout = self.config.handshake_timeout_value();
+        let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(());
 
         loop {
             tokio::select! {
@@ -495,6 +496,9 @@ impl Server {
 
                 _ = &mut signal => {
                     tracing::info!("Shutdown signal received; stopping native-tls listener on {}", self.addr);
+                    // Tell every established connection to finish its current
+                    // request and close instead of serving new ones.
+                    let _ = conn_shutdown_tx.send(());
                     break;
                 }
                 joined = connections.join_next(), if !connections.is_empty() => {

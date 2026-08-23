@@ -13,9 +13,9 @@
 //!
 //! After calling [`Router::with_state`] you receive a `Router<()>`. Call
 //! [`Router::into_service`] to obtain a [`BoxCloneService`] with all layers
-//! baked in, ready to be passed to [`arvik_hyper::Server::serve_service`].
+//! baked in, ready to be passed to `arvik_hyper::Server::serve_service`.
 //!
-//! [`arvik_hyper::serve_app`] calls `into_service()` internally.
+//! `arvik_hyper::serve_app` calls `into_service()` internally.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -368,7 +368,7 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
 
     /// Apply a Tower middleware layer to **matched routes only**.
     ///
-    /// Unlike [`layer`], this does not run on 404/405 responses.
+    /// Unlike `layer`, this does not run on 404/405 responses.
     /// Processes the request **after** outer layers but **before** per-method layers.
     ///
     /// ```rust,ignore
@@ -395,8 +395,8 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
 
     /// Bind application state, converting `Router<S>` → `Router<()>`.
     ///
-    /// Call this once before passing your router to [`serve_app`] or
-    /// [`into_service`].
+    /// Call this once before passing your router to `serve_app` or
+    /// `into_service`.
     pub fn with_state(self, state: S) -> Router<()> {
         let state = Arc::new(state);
 
@@ -430,7 +430,7 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     /// Dispatch a request directly, **without** applying outer layers.
     ///
     /// This method exists for backward compatibility and internal testing.
-    /// For production serving use [`into_service`] (via [`serve_app`]).
+    /// For production serving use `into_service` (via `serve_app`).
     pub async fn call(&self, mut req: Request, state: S) -> Response {
         let path = req.uri().path();
 

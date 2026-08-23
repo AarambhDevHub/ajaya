@@ -31,7 +31,7 @@ pub struct BoxCloneService(Box<dyn ErasedSvc>);
 
 /// A closure that applies a Tower layer to a [`BoxCloneService`] and returns a new one.
 ///
-/// Stored inside [`Router`] and [`MethodRouter`] to defer layer application until
+/// Stored inside `Router` and `MethodRouter` to defer layer application until
 /// the service is actually built at serve time.
 ///
 /// ```rust,ignore
@@ -120,7 +120,7 @@ impl std::fmt::Debug for BoxCloneService {
 
 /// Convert any Tower [`Layer`] into a [`LayerFn`].
 ///
-/// Used by [`Router::layer`], [`Router::route_layer`], and [`MethodRouter::layer`].
+/// Used by `Router::layer`, `Router::route_layer`, and `MethodRouter::layer`.
 ///
 /// # Bounds
 ///

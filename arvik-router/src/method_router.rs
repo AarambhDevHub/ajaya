@@ -275,7 +275,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// Bind application state, converting `MethodRouter<S>` → `MethodRouter<()>`.
     ///
     /// After calling this, the method router is ready to be served directly
-    /// or attached to a [`Router`] that is itself bound with [`Router::with_state`].
+    /// or attached to a `Router` that is itself bound with `Router::with_state`.
     ///
     /// # Example
     ///

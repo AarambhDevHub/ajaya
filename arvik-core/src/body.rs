@@ -125,7 +125,7 @@ impl Body {
     ///
     /// Rejects early (before reading the stream) when a known
     /// `Content-Length` exceeds `limit`; otherwise stops reading and returns
-    /// [`BodyLimitError::TooLarge`] as soon as the accumulated data would
+    /// `BodyLimitError::TooLarge` as soon as the accumulated data would
     /// grow past `limit`.
     pub async fn to_bytes_limited(
         self,
