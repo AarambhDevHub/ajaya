@@ -184,14 +184,27 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// Dispatch the request to the matching method handler, applying any
     /// configured layers.
     ///
+    /// HEAD requests are served by the GET handler when no dedicated HEAD
+    /// handler is registered (RFC 9110 §9.3.2 — hyper strips the response
+    /// body for HEAD).
+    ///
     /// Returns `405 Method Not Allowed` (with an `Allow` header) if no handler
-    /// matches the request method.
+    /// matches the request method — including non-standard extension methods
+    /// (e.g. `PURGE`) unless the route registered [`MethodFilter::EXTENSION`]
+    /// or [`MethodFilter::ANY`].
     pub async fn call(&self, req: Request, state: S) -> Response {
         let method = req.method().clone();
         let method_filter = MethodFilter::from_method(&method);
 
+        // RFC 9110 §9.3.2: a HEAD response is a GET response without a body,
+        // so fall back to the GET handler unless HEAD was explicitly bound.
+        let head_falls_back_to_get =
+            method == http::Method::HEAD && !self.allow_methods.contains(MethodFilter::HEAD);
+
         for (filter, handler) in &self.handlers {
-            if filter.contains(method_filter) {
+            let matched = filter.contains(method_filter)
+                || (head_falls_back_to_get && filter.contains(MethodFilter::GET));
+            if matched {
                 if self.layers.is_empty() {
                     // ── Fast path: no per-route layers ──────────────────────
                     let h = handler.clone_box();
@@ -435,4 +448,80 @@ fn build_allow_header(filter: MethodFilter) -> String {
         .map(|(_, m)| *m)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arvik_core::Body;
+
+    async fn get_handler() -> &'static str {
+        "get-body"
+    }
+
+    async fn delete_handler() -> &'static str {
+        "deleted"
+    }
+
+    async fn head_handler() -> &'static str {
+        "head-body"
+    }
+
+    async fn any_handler() -> &'static str {
+        "any-body"
+    }
+
+    fn request(method: &str) -> Request {
+        Request::new(
+            http::Request::builder()
+                .method(method)
+                .uri("/")
+                .body(Body::empty())
+                .unwrap(),
+        )
+    }
+
+    async fn body_string(res: Response) -> String {
+        res.into_body().to_string().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn unknown_method_returns_405_not_the_registered_handler() {
+        let router = MethodRouter::new().delete(delete_handler);
+        let res = router.call(request("PURGE"), ()).await;
+        assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(res.headers().get(http::header::ALLOW).unwrap(), "DELETE");
+        assert_eq!(body_string(res).await, "Method Not Allowed");
+    }
+
+    #[tokio::test]
+    async fn known_method_mismatch_still_returns_405() {
+        let router = MethodRouter::new().delete(delete_handler);
+        let res = router.call(request("POST"), ()).await;
+        assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    #[tokio::test]
+    async fn any_route_still_matches_extension_methods() {
+        let router = MethodRouter::new().on(MethodFilter::ANY, any_handler);
+        let res = router.call(request("PURGE"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_string(res).await, "any-body");
+    }
+
+    #[tokio::test]
+    async fn head_falls_back_to_get_handler() {
+        let router = MethodRouter::new().get(get_handler);
+        let res = router.call(request("HEAD"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_string(res).await, "get-body");
+    }
+
+    #[tokio::test]
+    async fn dedicated_head_handler_takes_precedence_over_get() {
+        let router = MethodRouter::new().get(get_handler).head(head_handler);
+        let res = router.call(request("HEAD"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_string(res).await, "head-body");
+    }
 }
