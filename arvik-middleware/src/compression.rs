@@ -143,21 +143,29 @@ impl CompressionLayer {
     }
 
     fn preferred_encoding(&self, accept_encoding: &str) -> Option<Encoding> {
-        // Simple preference: zstd > br > gzip > deflate
-        let lower = accept_encoding.to_lowercase();
-        if self.zstd && lower.contains("zstd") {
-            return Some(Encoding::Zstd);
+        // Priority order zstd > br > gzip > deflate, negotiated with real
+        // q-value semantics (substring matching used to serve brotli to
+        // clients that explicitly refused it with `br;q=0`).
+        let mut candidates = Vec::with_capacity(4);
+        if self.zstd {
+            candidates.push(("zstd", Encoding::Zstd));
         }
-        if self.br && (lower.contains("br") || lower.contains("brotli")) {
-            return Some(Encoding::Br);
+        if self.br {
+            candidates.push(("br", Encoding::Br));
         }
-        if self.gzip && lower.contains("gzip") {
-            return Some(Encoding::Gzip);
+        if self.gzip {
+            candidates.push(("gzip", Encoding::Gzip));
         }
-        if self.deflate && lower.contains("deflate") {
-            return Some(Encoding::Deflate);
+        if self.deflate {
+            candidates.push(("deflate", Encoding::Deflate));
         }
-        None
+        let names: Vec<&str> = candidates.iter().map(|(name, _)| *name).collect();
+        arvik_core::accept::negotiate(&names, accept_encoding).and_then(|chosen| {
+            candidates
+                .into_iter()
+                .find(|(name, _)| *name == chosen)
+                .map(|(_, encoding)| encoding)
+        })
     }
 }
 

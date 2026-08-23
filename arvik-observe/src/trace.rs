@@ -103,7 +103,9 @@ where
             tracing::Span::none()
         } else {
             let method = req.method().as_str().to_owned();
-            let url = req.uri().to_string();
+            // Path only — query strings routinely carry credentials and must
+            // not land in traces by default.
+            let url = req.uri().path().to_string();
             let user_agent = req
                 .headers()
                 .get(http::header::USER_AGENT)

@@ -36,8 +36,15 @@ impl std::fmt::Display for PathRejection {
 
 impl IntoResponse for PathRejection {
     fn into_response(self) -> Response {
+        // MissingPathParams means routing did not attach params — a server-side
+        // wiring mistake (fallback handler / middleware outside routing), not a
+        // client error.
+        let status = match &self {
+            Self::MissingPathParams => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::DeserializationFailed(_) => StatusCode::BAD_REQUEST,
+        };
         ResponseBuilder::new()
-            .status(StatusCode::BAD_REQUEST)
+            .status(status)
             .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
             .body(arvik_core::Body::from(self.to_string()))
     }

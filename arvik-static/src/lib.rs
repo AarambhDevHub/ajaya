@@ -1121,24 +1121,18 @@ fn join_asset_path(base: &str, file: &str) -> String {
 }
 
 fn accepts_encoding(req: &Request, encoding: &str) -> bool {
-    req.headers()
-        .get(header::ACCEPT_ENCODING)
-        .and_then(|value| value.to_str().ok())
-        .map(|header| {
-            header.split(',').any(|part| {
-                let mut pieces = part.trim().split(';');
-                let token = pieces.next().unwrap_or("").trim();
-                let mut q = 1.0_f32;
-                for param in pieces {
-                    let param = param.trim();
-                    if let Some(value) = param.strip_prefix("q=") {
-                        q = value.parse::<f32>().unwrap_or(0.0);
-                    }
-                }
-                q > 0.0 && (token.eq_ignore_ascii_case(encoding) || token == "*")
-            })
-        })
-        .unwrap_or(false)
+    // Combine every header line (RFC 9110 §5.2 allows multi-line lists) and
+    // negotiate with q-value semantics — the old single-line `any()` check let
+    // `*;q=1` override an explicit `br;q=0` refusal.
+    let combined = req
+        .headers()
+        .get_all(header::ACCEPT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    arvik_core::accept::negotiate(&[encoding], &combined).is_some()
 }
 
 #[derive(Clone, Copy)]
@@ -1158,11 +1152,16 @@ fn parse_range(value: Option<&HeaderValue>, len: u64) -> RangeDecision {
         return RangeDecision::Full;
     };
 
+    // RFC 9110 §14.2: an unrecognized range unit MUST be ignored (serve 200
+    // full), not answered with 416.
     let Some(spec) = value.strip_prefix("bytes=") else {
-        return RangeDecision::Unsatisfiable;
+        return RangeDecision::Full;
     };
+    // Multi-range requests would need multipart/byteranges bodies; serving a
+    // single span would corrupt clients expecting all ranges. Full 200 is the
+    // safe, spec-permitted answer.
     if spec.contains(',') || spec.is_empty() {
-        return RangeDecision::Unsatisfiable;
+        return RangeDecision::Full;
     }
 
     let Some((start, end)) = spec.split_once('-') else {

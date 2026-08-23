@@ -17,6 +17,7 @@
 //! - [`Html`] — HTML response type
 //! - [`Error`] — Framework error type
 
+pub mod accept;
 pub mod body;
 pub mod body_limit;
 pub mod error;

@@ -440,7 +440,7 @@ impl Default for Http2Section {
 }
 
 /// Optional TLS file settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TlsSection {
     /// TLS backend.
@@ -453,6 +453,23 @@ pub struct TlsSection {
     pub pkcs12_path: Option<PathBuf>,
     /// PKCS#12 identity password for native-tls.
     pub pkcs12_password: Option<String>,
+}
+
+impl std::fmt::Debug for TlsSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never render the keystore password: any `{:?}` of the config would
+        // otherwise leak it to logs and crash dumps.
+        f.debug_struct("TlsSection")
+            .field("backend", &self.backend)
+            .field("cert_path", &self.cert_path)
+            .field("key_path", &self.key_path)
+            .field("pkcs12_path", &self.pkcs12_path)
+            .field(
+                "pkcs12_password",
+                &self.pkcs12_password.as_ref().map(|_| "***REDACTED***"),
+            )
+            .finish()
+    }
 }
 
 impl Default for TlsSection {
@@ -622,7 +639,12 @@ fn merge_values(base: &mut Value, overlay: Value) {
 fn apply_env(root: &mut Value, prefix: &str) -> Result<()> {
     let prefix = format!("{}_", prefix.trim_end_matches('_'));
     let mut unknown: Vec<String> = Vec::new();
-    for (var, value) in std::env::vars() {
+    for (raw_var, raw_value) in std::env::vars_os() {
+        // Skip non-UTF-8 entries instead of panicking on unrelated variables
+        // somewhere in the process environment.
+        let (Ok(var), Ok(value)) = (raw_var.into_string(), raw_value.into_string()) else {
+            continue;
+        };
         if !var.starts_with(&prefix) {
             continue;
         }

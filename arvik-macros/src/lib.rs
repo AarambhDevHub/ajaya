@@ -662,7 +662,9 @@ fn normalize_route_path(path: &str) -> std::result::Result<String, String> {
 
 fn arvik_path() -> TokenStream2 {
     match proc_macro_crate::crate_name("arvik") {
-        Ok(proc_macro_crate::FoundCrate::Itself) => quote!(::arvik),
+        // proc-macro-crate docs: from the defining crate itself, refer via
+        // `crate` — `::arvik` does not resolve there.
+        Ok(proc_macro_crate::FoundCrate::Itself) => quote!(crate),
         Ok(proc_macro_crate::FoundCrate::Name(name)) => {
             let ident = Ident::new(&name, Span::call_site());
             quote!(::#ident)

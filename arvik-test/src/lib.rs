@@ -97,13 +97,54 @@ impl TestClient {
     fn store_response_cookies(&self, headers: &HeaderMap) {
         let mut jar = self.cookies.lock().expect("test cookie jar poisoned");
         for value in headers.get_all(SET_COOKIE) {
-            if let Ok(value) = value.to_str() {
-                if let Ok(cookie) = Cookie::parse(value.to_owned()) {
-                    jar.add(cookie.into_owned());
-                }
+            let Some(value) = value.to_str().ok() else {
+                continue;
+            };
+            let Ok(cookie) = Cookie::parse(value.to_owned()) else {
+                continue;
+            };
+
+            // Honor deletion so logout/expiry assertions behave like real
+            // browsers: `Max-Age<=0` or a past `Expires` removes the cookie.
+            if set_cookie_is_expired(value) {
+                jar.remove(cookie.into_owned());
+            } else {
+                jar.add(cookie.into_owned());
             }
         }
     }
+}
+
+/// RFC 6265 §5.3: `Max-Age` takes precedence over `Expires`; both zero/past
+/// values delete the cookie.
+fn set_cookie_is_expired(raw: &str) -> bool {
+    let attributes = raw.split(';').skip(1).map(str::trim);
+
+    for attribute in attributes.clone() {
+        if let Some(v) = attribute
+            .strip_prefix("Max-Age=")
+            .or_else(|| attribute.strip_prefix("max-age="))
+        {
+            return v
+                .trim()
+                .parse::<i64>()
+                .map(|secs| secs <= 0)
+                .unwrap_or(false);
+        }
+    }
+
+    for attribute in attributes {
+        if let Some(v) = attribute
+            .strip_prefix("Expires=")
+            .or_else(|| attribute.strip_prefix("expires="))
+        {
+            return httpdate::parse_http_date(v.trim())
+                .map(|time| time <= std::time::SystemTime::now())
+                .unwrap_or(false);
+        }
+    }
+
+    false
 }
 
 /// Builder for test requests.
@@ -186,8 +227,20 @@ impl TestRequestBuilder {
 
     /// Dispatch the request and return the response.
     pub async fn send(mut self) -> TestResponse {
-        if let Some(cookie_header) = self.client.cookie_header() {
-            self.headers.insert(COOKIE, cookie_header);
+        let jar_header = self
+            .client
+            .cookie_header()
+            .and_then(|value| value.to_str().ok().map(str::to_owned));
+        if let Some(jar_header) = jar_header {
+            // Merge with any explicitly set Cookie header instead of
+            // clobbering it.
+            let merged = match self.headers.get(COOKIE).and_then(|v| v.to_str().ok()) {
+                Some(existing) => format!("{existing}; {jar_header}"),
+                None => jar_header,
+            };
+            if let Ok(value) = HeaderValue::from_str(&merged) {
+                self.headers.insert(COOKIE, value);
+            }
         }
 
         if !self.extra_cookies.is_empty() {

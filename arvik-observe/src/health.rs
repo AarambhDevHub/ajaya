@@ -10,7 +10,7 @@ use arvik_core::{Response, ResponseBuilder};
 use futures_util::future::join_all;
 use http::StatusCode;
 use once_cell::sync::Lazy;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::Serialize;
 
 const DEFAULT_CHECK_TIMEOUT: Duration = Duration::from_secs(2);
@@ -29,6 +29,8 @@ struct HealthInner {
     checks: RwLock<Vec<HealthCheck>>,
     check_timeout: RwLock<Duration>,
     startup_complete: AtomicBool,
+    readiness_cache_ttl: RwLock<Duration>,
+    readiness_cache: parking_lot::Mutex<Option<(Instant, Vec<CheckReport>)>>,
 }
 
 #[derive(Clone)]
@@ -94,7 +96,12 @@ where
     fn into_health_check_result(self) -> HealthCheckResult {
         match self {
             Ok(_) => HealthCheckResult::ok(),
-            Err(err) => HealthCheckResult::unhealthy(err.to_string()),
+            Err(err) => {
+                // Driver/DSN text must not reach the public probe body during
+                // an outage; keep the detail in logs for operators.
+                tracing::error!(error = %err, "health check failed");
+                HealthCheckResult::unhealthy("check failed")
+            }
         }
     }
 }
@@ -107,7 +114,7 @@ struct ProbeResponse {
     checks: Vec<CheckReport>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct CheckReport {
     name: String,
     status: &'static str,
@@ -115,6 +122,10 @@ struct CheckReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     message: Option<String>,
 }
+
+/// How long a readiness probe result is reused before checks run again.
+/// Bursts of kubelet/LB probes then cost one dependency round-trip instead of N.
+const DEFAULT_READINESS_CACHE_TTL: Duration = Duration::from_secs(1);
 
 impl HealthRegistry {
     /// Create a health registry. Startup is considered complete by default.
@@ -125,6 +136,8 @@ impl HealthRegistry {
                 checks: RwLock::new(Vec::new()),
                 check_timeout: RwLock::new(DEFAULT_CHECK_TIMEOUT),
                 startup_complete: AtomicBool::new(true),
+                readiness_cache_ttl: RwLock::new(DEFAULT_READINESS_CACHE_TTL),
+                readiness_cache: Mutex::new(None),
             }),
         }
     }
@@ -205,9 +218,34 @@ impl HealthRegistry {
         )
     }
 
+    /// Set how long a readiness result is reused before checks run again
+    /// (default 1 s). A zero TTL disables caching.
+    pub fn set_readiness_cache_ttl(&self, ttl: Duration) {
+        *self.inner.readiness_cache_ttl.write() = ttl;
+    }
+
     /// Build the `/health/ready` response.
     pub async fn readiness_response(&self) -> Response {
-        let checks = self.run_checks().await;
+        let ttl = *self.inner.readiness_cache_ttl.read();
+
+        let checks = if ttl.is_zero() {
+            self.run_checks().await
+        } else {
+            let cached = self
+                .inner
+                .readiness_cache
+                .lock()
+                .clone()
+                .filter(|(at, _)| at.elapsed() < ttl);
+            match cached {
+                Some((_, checks)) => checks,
+                None => {
+                    let checks = self.run_checks().await;
+                    *self.inner.readiness_cache.lock() = Some((Instant::now(), checks.clone()));
+                    checks
+                }
+            }
+        };
         let healthy = checks.iter().all(|check| check.status == "ok");
         let status = if healthy {
             StatusCode::OK

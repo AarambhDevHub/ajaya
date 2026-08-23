@@ -396,15 +396,30 @@ where
     }
 }
 
+/// Longest accepted client-supplied request id.
+const MAX_REQUEST_ID_LEN: usize = 128;
+
+/// True when the id is safe to echo into headers and every log line:
+/// printable ASCII, no whitespace/control characters, bounded length.
+/// Anything else gets replaced with a fresh UUID so attackers can neither
+/// forge correlation keys nor inflate log volume.
+fn is_valid_request_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_REQUEST_ID_LEN
+        && id.bytes().all(|b| (0x21..=0x7e).contains(&b))
+}
+
 fn request_id(req: &Request, header: &HeaderName) -> String {
     req.headers()
         .get(header)
         .and_then(|value| value.to_str().ok())
+        .filter(|id| is_valid_request_id(id))
         .map(str::to_owned)
         .or_else(|| {
             req.extensions()
                 .get::<RequestId>()
                 .map(|id| id.as_str().to_string())
+                .filter(|id| is_valid_request_id(id))
         })
         .unwrap_or_else(|| Uuid::new_v4().to_string())
 }

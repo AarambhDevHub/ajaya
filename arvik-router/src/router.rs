@@ -160,7 +160,6 @@ pub struct Router<S = ()> {
 struct RouteEntry<S> {
     pattern: Arc<str>,
     method_router: MethodRouter<S>,
-    param_names: Arc<[Arc<str>]>,
 }
 
 impl<S> RouteEntry<S> {
@@ -168,7 +167,6 @@ impl<S> RouteEntry<S> {
         Self {
             pattern: Arc::from(path),
             method_router,
-            param_names: extract_param_names(path).into(),
         }
     }
 }
@@ -408,7 +406,6 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
             .map(|entry| RouteEntry {
                 pattern: entry.pattern,
                 method_router: entry.method_router.with_state((*state).clone()),
-                param_names: entry.param_names,
             })
             .collect();
 
@@ -445,13 +442,11 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
 
                 if !matched.params.is_empty() {
                     let mut pp = PathParams::new();
-                    for (idx, (k, v)) in matched.params.iter().enumerate() {
-                        let key = entry
-                            .param_names
-                            .get(idx)
-                            .cloned()
-                            .unwrap_or_else(|| Arc::from(k));
-                        pp.push(key, percent_decode(v));
+                    // matchit's keys are the declared names — including
+                    // mid-segment params like `{id}.png` that positional
+                    // pattern parsing cannot align with.
+                    for (k, v) in matched.params.iter() {
+                        pp.push(Arc::from(k), percent_decode(v).into_owned());
                     }
                     req.extensions_mut().insert(pp);
                 }
@@ -564,13 +559,11 @@ impl RouterInner {
 
                 if !matched.params.is_empty() {
                     let mut pp = PathParams::new();
-                    for (idx, (k, v)) in matched.params.iter().enumerate() {
-                        let key = entry
-                            .param_names
-                            .get(idx)
-                            .cloned()
-                            .unwrap_or_else(|| Arc::from(k));
-                        pp.push(key, percent_decode(v));
+                    // matchit's keys are the declared names — including
+                    // mid-segment params like `{id}.png` that positional
+                    // pattern parsing cannot align with.
+                    for (k, v) in matched.params.iter() {
+                        pp.push(Arc::from(k), percent_decode(v).into_owned());
                     }
                     req.extensions_mut().insert(pp);
                 }
@@ -672,16 +665,6 @@ fn normalize_service_prefix(prefix: &str) -> String {
     }
 }
 
-fn extract_param_names(path: &str) -> Vec<Arc<str>> {
-    path.split('/')
-        .filter_map(|segment| {
-            let inner = segment.strip_prefix('{')?.strip_suffix('}')?;
-            let name = inner.strip_prefix('*').unwrap_or(inner);
-            (!name.is_empty()).then(|| Arc::from(name))
-        })
-        .collect()
-}
-
 /// Percent-decode a URL path segment in-place (ASCII-only fast path).
 /// Percent-decode a URL path segment (ASCII-only fast path).
 ///
@@ -691,10 +674,10 @@ fn extract_param_names(path: &str) -> Vec<Arc<str>> {
 /// cannot introduce separators into captured params, and `%00`, `%0A`, `%0D`
 /// stay escaped so NUL/CRLF cannot reach handlers, filesystems, or logs
 /// through decoded values. Literal separators in the URL are unaffected.
-fn percent_decode(input: &str) -> String {
+fn percent_decode(input: &str) -> std::borrow::Cow<'_, str> {
     let bytes = input.as_bytes();
     if !bytes.contains(&b'%') {
-        return input.to_string(); // fast path: nothing to decode
+        return std::borrow::Cow::Borrowed(input); // fast path: nothing to decode
     }
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -715,7 +698,7 @@ fn percent_decode(input: &str) -> String {
         out.push(bytes[i]);
         i += 1;
     }
-    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
+    std::borrow::Cow::Owned(String::from_utf8(out).unwrap_or_else(|_| input.to_string()))
 }
 
 #[inline]
@@ -754,13 +737,6 @@ mod tests {
         assert_eq!(percent_decode("%e2%82%ac"), "\u{20ac}");
         // Invalid UTF-8 falls back to the input unchanged.
         assert_eq!(percent_decode("%ff"), "%ff");
-    }
-
-    #[test]
-    fn extracts_param_names_at_registration_time() {
-        let names = extract_param_names("/users/{id}/files/{*path}");
-        let names: Vec<_> = names.iter().map(|name| name.as_ref()).collect();
-        assert_eq!(names, vec!["id", "path"]);
     }
 
     #[test]
@@ -943,7 +919,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn param_route_uses_interned_names_and_decodes_values() {
+    async fn mid_segment_params_expose_their_declared_names() {
+        async fn h(req: arvik_core::Request) -> String {
+            let params = req.extensions().get::<PathParams>().unwrap();
+            format!(
+                "{}:{}",
+                params.get("id").unwrap_or("MISSING"),
+                params.get("tag").unwrap_or("MISSING")
+            )
+        }
+
+        // matchit supports mid-segment params; positional pattern parsing used
+        // to misalign these (audit L2).
+        let mut app = Router::new()
+            .route("/images/img{id}.png/{tag}", crate::get(h))
+            .into_service();
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/images/img7.png/nature")
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        );
+
+        let res = app.call(req).await.unwrap();
+        let text = String::from_utf8(res.into_body().to_bytes().await.unwrap().to_vec()).unwrap();
+        assert_eq!(text, "7:nature");
+    }
+
+    #[tokio::test]
+    async fn param_route_decodes_values() {
         async fn h(req: arvik_core::Request) -> String {
             let params = req.extensions().get::<PathParams>().unwrap();
             format!(
