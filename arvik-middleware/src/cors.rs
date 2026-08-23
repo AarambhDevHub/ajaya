@@ -42,9 +42,10 @@
 //!
 //! # Credential support
 //!
-//! When `allow_credentials(true)` is set, the `Access-Control-Allow-Origin`
-//! header **cannot** be `*` per the CORS spec. Arvik automatically switches
-//! from `*` to reflecting the request `Origin`.
+//! `allow_credentials(true)` requires an explicit origin allowlist — the CORS
+//! spec forbids `Access-Control-Allow-Origin: *` with credentials, and
+//! mirroring arbitrary origins would make every site a trusted credentialed
+//! origin. That combination panics at construction.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -154,10 +155,14 @@ impl CorsLayer {
         }
     }
 
-    /// Allow all origins with credentials.
+    /// Allow all origins, methods, and headers — for **local development**.
     ///
-    /// Mirrors the request `Origin` (CORS spec forbids `*` with credentials).
-    /// Suitable for trusted cross-origin applications that need cookies or auth.
+    /// Mirrors the request `Origin`. Credentials are NOT enabled: mirroring
+    /// arbitrary origins together with `Access-Control-Allow-Credentials:
+    /// true` lets any website read authenticated responses from your users.
+    /// For credentialed cross-origin apps in production, list explicit
+    /// origins with [`CorsLayer::allow_origin`] and then enable
+    /// [`CorsLayer::allow_credentials`].
     pub fn very_permissive() -> Self {
         Self {
             config: Arc::new(CorsConfig {
@@ -165,7 +170,7 @@ impl CorsLayer {
                 allow_methods: AllowMethods::Any,
                 allow_headers: AllowHeaders::Mirror,
                 expose_headers: Vec::new(),
-                allow_credentials: true,
+                allow_credentials: false,
                 max_age_secs: Some(86400),
             }),
         }
@@ -176,6 +181,7 @@ impl CorsLayer {
     fn mutate<F: FnOnce(&mut CorsConfig)>(self, f: F) -> Self {
         let mut cfg = Arc::try_unwrap(self.config).unwrap_or_else(|arc| (*arc).clone());
         f(&mut cfg);
+        assert_credentials_safe(&cfg);
         Self {
             config: Arc::new(cfg),
         }
@@ -232,19 +238,17 @@ impl CorsLayer {
 
     /// Allow or deny cookies, HTTP auth, and TLS client certificates.
     ///
-    /// When set to `true`:
-    /// - `Access-Control-Allow-Credentials: true` is added to responses.
-    /// - `Access-Control-Allow-Origin` cannot be `*`; the layer automatically
-    ///   switches to mirroring the request origin.
+    /// When set to `true`, `Access-Control-Allow-Credentials: true` is added
+    /// to responses and the allowed origins MUST be an explicit list —
+    /// wildcard or mirrored origins would make every site a trusted
+    /// credentialed origin, so that combination is rejected at construction.
+    ///
+    /// # Panics
+    ///
+    /// Panics when credentials are enabled while origins are wildcarded or
+    /// mirrored. List explicit origins with [`CorsLayer::allow_origin`].
     pub fn allow_credentials(self, allow: bool) -> Self {
-        self.mutate(|c| {
-            c.allow_credentials = allow;
-            if allow {
-                if let AllowOrigin::Any = c.allow_origins {
-                    c.allow_origins = AllowOrigin::Mirror;
-                }
-            }
-        })
+        self.mutate(|c| c.allow_credentials = allow)
     }
 
     /// Set the preflight response cache duration (`Access-Control-Max-Age`).
@@ -256,6 +260,24 @@ impl CorsLayer {
 impl Default for CorsLayer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Safety invariant ─────────────────────────────────────────────────────────
+
+/// Reject the one CORS combination that disables the browser's protection
+/// entirely: reflecting arbitrary origins while allowing credentials. That
+/// lets any website attach the victim's cookies/auth and read responses.
+/// Fail loudly at construction instead of silently in production.
+fn assert_credentials_safe(cfg: &CorsConfig) {
+    if cfg.allow_credentials && matches!(cfg.allow_origins, AllowOrigin::Mirror | AllowOrigin::Any)
+    {
+        panic!(
+            "CORS misconfiguration: allow_credentials(true) combined with wildcard or \
+             mirrored origins trusts EVERY site with the user's cookies and auth headers. \
+             List explicit origins via .allow_origin([\"https://app.example.com\", ...]) \
+             before enabling credentials."
+        );
     }
 }
 
@@ -451,10 +473,13 @@ impl CorsConfig {
             }
         }
 
-        // Vary: Origin — required when response differs per origin
-        if !matches!(&self.allow_origins, AllowOrigin::Any) || self.allow_credentials {
-            builder = builder.header(VARY, "origin");
-        }
+        // Preflight replies are cacheable and differ per Origin, per requested
+        // method, and per requested headers — declare all three so a shared
+        // cache/CDN cannot serve one page's preflight to another.
+        builder = builder.header(
+            VARY,
+            "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+        );
 
         builder.body(Body::empty())
     }
@@ -494,6 +519,105 @@ impl CorsConfig {
         // Vary: Origin — ensures caches don't serve wrong-origin responses
         if !matches!(&self.allow_origins, AllowOrigin::Any) || self.allow_credentials {
             headers.append(VARY, HeaderValue::from_static("origin"));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arvik_core::{Body, Request};
+    use std::convert::Infallible;
+    use std::pin::Pin;
+
+    fn preflight(origin: &str, method: &str) -> Request {
+        Request::new(
+            http::Request::builder()
+                .method(Method::OPTIONS)
+                .uri("/")
+                .header(ORIGIN, origin)
+                .header(ACCESS_CONTROL_REQUEST_METHOD, method)
+                .body(Body::empty())
+                .unwrap(),
+        )
+    }
+
+    #[derive(Clone)]
+    struct OkService;
+
+    impl Service<Request> for OkService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: Request) -> Self::Future {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::empty())
+                    .unwrap())
+            })
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "CORS misconfiguration")]
+    fn mirrored_origins_with_credentials_are_rejected_at_construction() {
+        let _ = CorsLayer::very_permissive().allow_credentials(true);
+    }
+
+    #[test]
+    #[should_panic(expected = "CORS misconfiguration")]
+    fn permissive_plus_credentials_is_rejected_at_construction() {
+        let _ = CorsLayer::permissive().allow_credentials(true);
+    }
+
+    #[tokio::test]
+    async fn explicit_origins_with_credentials_are_allowed() {
+        let mut svc = CorsLayer::new()
+            .allow_origin(["https://app.example.com".parse::<HeaderValue>().unwrap()])
+            .allow_credentials(true)
+            .layer(OkService);
+
+        let res = svc
+            .call(preflight("https://app.example.com", "GET"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            res.headers()
+                .get(ACCESS_CONTROL_ALLOW_CREDENTIALS)
+                .and_then(|v| v.to_str().ok()),
+            Some("true")
+        );
+    }
+
+    #[tokio::test]
+    async fn preflight_vary_names_all_request_dependent_dimensions() {
+        let mut svc = CorsLayer::very_permissive().layer(OkService);
+
+        let res = svc
+            .call(preflight("https://dev.local", "POST"))
+            .await
+            .unwrap();
+        let vary = res
+            .headers()
+            .get(VARY)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        for expected in [
+            "Origin",
+            "Access-Control-Request-Method",
+            "Access-Control-Request-Headers",
+        ] {
+            assert!(
+                vary.contains(expected),
+                "Vary `{vary}` must contain `{expected}`"
+            );
         }
     }
 }
