@@ -121,6 +121,42 @@ impl Body {
         Ok(collected.to_bytes())
     }
 
+    /// Collect the body into [`Bytes`], enforcing a maximum size.
+    ///
+    /// Rejects early (before reading the stream) when a known
+    /// `Content-Length` exceeds `limit`; otherwise stops reading and returns
+    /// [`BodyLimitError::TooLarge`] as soon as the accumulated data would
+    /// grow past `limit`.
+    pub async fn to_bytes_limited(
+        self,
+        limit: usize,
+    ) -> Result<Bytes, crate::body_limit::BodyLimitError> {
+        use crate::body_limit::BodyLimitError;
+
+        // Fast path: declared length already over the limit.
+        if let Some(upper) = http_body::Body::size_hint(&self).upper() {
+            if upper > limit as u64 {
+                return Err(BodyLimitError::TooLarge);
+            }
+        }
+
+        let mut buf = bytes::BytesMut::new();
+        let mut body = self;
+        while let Some(frame) = BodyExt::frame(&mut body).await {
+            let data = frame?.into_data().map_err(|_| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "unexpected body trailer",
+                )) as BoxError
+            })?;
+            if buf.len() + data.len() > limit {
+                return Err(BodyLimitError::TooLarge);
+            }
+            buf.extend_from_slice(&data);
+        }
+        Ok(buf.freeze())
+    }
+
     /// Collect the entire body into a UTF-8 [`String`].
     ///
     /// Returns an error if the body is not valid UTF-8 or if
@@ -358,6 +394,37 @@ mod tests {
         let body = Body::empty();
         assert!(body.is_empty_hint());
         assert_eq!(body.to_bytes().await.unwrap(), Bytes::new());
+    }
+
+    #[tokio::test]
+    async fn to_bytes_limited_rejects_oversized_full_body() {
+        let body = Body::from_bytes(vec![0u8; 128].into());
+        match body.to_bytes_limited(64).await {
+            Err(crate::body_limit::BodyLimitError::TooLarge) => {}
+            other => panic!("expected TooLarge, got {:?}", other.map(|b| b.len())),
+        }
+    }
+
+    #[tokio::test]
+    async fn to_bytes_limited_accepts_bodies_under_limit() {
+        let body = Body::from_bytes(vec![7u8; 10].into());
+        let bytes = body.to_bytes_limited(64).await.unwrap();
+        assert_eq!(bytes.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn to_bytes_limited_rejects_streaming_body_without_content_length() {
+        let chunks: Vec<Result<Bytes, std::io::Error>> = vec![
+            Ok(Bytes::from_static(&[0u8; 40])),
+            Ok(Bytes::from_static(&[0u8; 40])),
+        ];
+        let body = Body::from_stream(futures_util::stream::iter(chunks));
+        // No size-hint upper bound — the cap must trigger mid-stream.
+        assert!(http_body::Body::size_hint(&body).upper().is_none());
+        match body.to_bytes_limited(64).await {
+            Err(crate::body_limit::BodyLimitError::TooLarge) => {}
+            other => panic!("expected TooLarge, got {:?}", other.map(|b| b.len())),
+        }
     }
 
     #[tokio::test]

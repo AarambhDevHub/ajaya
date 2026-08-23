@@ -261,25 +261,107 @@ impl<S: Send + Sync> FromRequest<S> for Request {
 }
 
 /// Extract the raw body as [`bytes::Bytes`].
+///
+/// The body is buffered under the request's [`crate::body_limit::DefaultBodyLimit`]
+/// (2 MiB by default); larger bodies are rejected with `413`.
 impl<S: Send + Sync> FromRequest<S> for bytes::Bytes {
     type Rejection = crate::Error;
 
     async fn from_request(req: Request, _state: &S) -> Result<Self, Self::Rejection> {
-        req.into_body().to_bytes().await.map_err(crate::Error::new)
+        let limit = crate::body_limit::resolve_limit(req.extensions());
+        req.into_body()
+            .to_bytes_limited(limit)
+            .await
+            .map_err(body_limit_rejection)
     }
 }
 
 /// Extract the raw body as a UTF-8 [`String`].
+///
+/// The body is buffered under the request's [`crate::body_limit::DefaultBodyLimit`]
+/// (2 MiB by default); larger bodies are rejected with `413`.
 impl<S: Send + Sync> FromRequest<S> for String {
     type Rejection = crate::Error;
 
     async fn from_request(req: Request, _state: &S) -> Result<Self, Self::Rejection> {
+        let limit = crate::body_limit::resolve_limit(req.extensions());
         let bytes = req
             .into_body()
-            .to_bytes()
+            .to_bytes_limited(limit)
             .await
-            .map_err(crate::Error::new)?;
+            .map_err(body_limit_rejection)?;
         String::from_utf8(bytes.to_vec())
             .map_err(|e| crate::Error::new(e).with_status(http::StatusCode::BAD_REQUEST))
+    }
+}
+
+/// Map a limited-body read failure onto an [`crate::Error`] response:
+/// `413 Payload Too Large` when the limit was hit, `500` on read errors.
+fn body_limit_rejection(e: crate::body_limit::BodyLimitError) -> crate::Error {
+    if e.is_payload_too_large() {
+        return crate::Error::new(e).with_status(http::StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    crate::Error::new(e)
+}
+
+#[cfg(test)]
+mod body_limit_tests {
+    use super::*;
+    use crate::body::Body;
+    use crate::body_limit::{DEFAULT_BODY_LIMIT, DefaultBodyLimit};
+    use http::StatusCode;
+
+    fn post_request(body: Body) -> Request {
+        Request::new(
+            http::Request::builder()
+                .method(http::Method::POST)
+                .uri("/")
+                .body(body)
+                .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn bytes_extractor_enforces_default_body_limit() {
+        let req = post_request(Body::from_bytes(vec![0u8; DEFAULT_BODY_LIMIT + 1].into()));
+        let err = <bytes::Bytes as FromRequest<()>>::from_request(req, &())
+            .await
+            .unwrap_err();
+        assert_eq!(err.into_response().status(), StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn bytes_extractor_accepts_body_at_limit() {
+        let req = post_request(Body::from_bytes(vec![0u8; DEFAULT_BODY_LIMIT].into()));
+        let bytes = <bytes::Bytes as FromRequest<()>>::from_request(req, &())
+            .await
+            .unwrap();
+        assert_eq!(bytes.len(), DEFAULT_BODY_LIMIT);
+    }
+
+    #[tokio::test]
+    async fn default_body_limit_extension_overrides_the_default() {
+        let mut req = post_request(Body::from_bytes(vec![0u8; 16].into()));
+        req.extensions_mut().insert(DefaultBodyLimit::max(8));
+        let err = <bytes::Bytes as FromRequest<()>>::from_request(req, &())
+            .await
+            .unwrap_err();
+        assert_eq!(err.into_response().status(), StatusCode::PAYLOAD_TOO_LARGE);
+
+        let mut req = post_request(Body::from_bytes(vec![0u8; 16].into()));
+        req.extensions_mut().insert(DefaultBodyLimit::disabled());
+        let bytes = <bytes::Bytes as FromRequest<()>>::from_request(req, &())
+            .await
+            .unwrap();
+        assert_eq!(bytes.len(), 16);
+    }
+
+    #[tokio::test]
+    async fn string_extractor_rejects_oversized_body() {
+        let req = post_request(Body::from_bytes(vec![b'a'; DEFAULT_BODY_LIMIT + 1].into()));
+        let err = <String as FromRequest<()>>::from_request(req, &())
+            .await
+            .unwrap_err();
+        assert_eq!(err.into_response().status(), StatusCode::PAYLOAD_TOO_LARGE);
     }
 }

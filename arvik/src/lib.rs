@@ -87,6 +87,10 @@ pub use arvik_core::ResponseParts; // 0.3.2
 pub use arvik_core::FromRequest;
 pub use arvik_core::FromRequestParts;
 
+// Body size limiting (0.9.6)
+pub use arvik_core::body_limit::DEFAULT_BODY_LIMIT;
+pub use arvik_core::body_limit::DefaultBodyLimit;
+
 // ---------------------------------------------------------------------------
 // Router types
 // ---------------------------------------------------------------------------
@@ -345,7 +349,7 @@ pub mod middleware {
 // Add at the top-level of lib.rs (outside the middleware module):
 pub use arvik_middleware::CorsLayer;
 pub use arvik_middleware::auth::RequireAuthorizationLayer;
-pub use arvik_middleware::body_limit::RequestBodyLimitLayer;
+pub use arvik_middleware::body_limit::{DefaultBodyLimitLayer, RequestBodyLimitLayer};
 pub use arvik_middleware::catch_panic::CatchPanicLayer;
 pub use arvik_middleware::compression::{CompressionLayer, CompressionLevel, DecompressionLayer};
 pub use arvik_middleware::csrf::{CsrfLayer, CsrfToken};
