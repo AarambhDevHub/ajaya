@@ -156,6 +156,19 @@ pub mod rustls {
             Arc::clone(&self.inner.read())
         }
 
+        /// Restrict ALPN advertisement to HTTP/2 only.
+        ///
+        /// Use when the server is configured with `http2_only(true)`: otherwise
+        /// the default offer invites clients to negotiate `http/1.1` while the
+        /// server answers with HTTP/2 frames, which compliant clients reject.
+        pub fn with_alpn_http2_only(self) -> Self {
+            let current = self.inner.read().clone();
+            let mut updated = (*current).clone();
+            updated.alpn_protocols = vec![ALPN_HTTP2.to_vec()];
+            *self.inner.write() = Arc::new(updated);
+            self
+        }
+
         /// Return a TLS acceptor using the currently active config.
         pub fn acceptor(&self) -> TlsAcceptor {
             TlsAcceptor::from(self.current_config())
@@ -398,6 +411,8 @@ pub mod native {
         pub fn from_pkcs12(data: impl AsRef<[u8]>, password: &str) -> Result<Self> {
             let identity = native_tls::Identity::from_pkcs12(data.as_ref(), password)?;
             let mut builder = native_tls::TlsAcceptor::builder(identity);
+            // native-tls 0.2.18: accept_alpn is infallible (returns the
+            // builder), so ALPN setup cannot silently fail on this version.
             builder.accept_alpn(&["h2", "http/1.1"]);
             let acceptor = builder.build()?;
             Ok(Self {

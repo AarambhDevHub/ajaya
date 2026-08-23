@@ -255,8 +255,19 @@ where
         let (headers, body) = self;
         let mut r = body.into_response();
         for (key, value) in headers {
-            if let (Ok(name), Ok(val)) = (key.try_into(), value.try_into()) {
-                r.headers_mut().insert(name, val);
+            match (key.try_into(), value.try_into()) {
+                (Ok(name), Ok(val)) => {
+                    r.headers_mut().insert(name, val);
+                }
+                (Err(e), _) => tracing::warn!(
+                    header = %std::any::type_name::<K>(),
+                    error = ?e,
+                    "response tuple: invalid header name; header dropped"
+                ),
+                (_, Err(e)) => tracing::warn!(
+                    error = ?e,
+                    "response tuple: invalid header value; header dropped"
+                ),
             }
         }
         r
@@ -280,8 +291,19 @@ where
         let mut r = body.into_response();
         *r.status_mut() = status;
         for (key, value) in headers {
-            if let (Ok(name), Ok(val)) = (key.try_into(), value.try_into()) {
-                r.headers_mut().insert(name, val);
+            match (key.try_into(), value.try_into()) {
+                (Ok(name), Ok(val)) => {
+                    r.headers_mut().insert(name, val);
+                }
+                (Err(e), _) => tracing::warn!(
+                    header = %std::any::type_name::<K>(),
+                    error = ?e,
+                    "response tuple: invalid header name; header dropped"
+                ),
+                (_, Err(e)) => tracing::warn!(
+                    error = ?e,
+                    "response tuple: invalid header value; header dropped"
+                ),
             }
         }
         r

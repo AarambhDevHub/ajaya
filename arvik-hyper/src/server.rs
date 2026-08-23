@@ -341,7 +341,9 @@ impl Server {
                     }
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
-                        drop(stream);
+                        // Best-effort 503 so clients and load balancers see an
+                        // HTTP signal instead of a bare connection reset.
+                        reject_over_capacity(stream).await;
                         continue;
                     }
 
@@ -418,7 +420,9 @@ impl Server {
                     }
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
-                        drop(stream);
+                        // Best-effort 503 so clients and load balancers see an
+                        // HTTP signal instead of a bare connection reset.
+                        reject_over_capacity(stream).await;
                         continue;
                     }
 
@@ -510,7 +514,9 @@ impl Server {
                     }
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
-                        drop(stream);
+                        // Best-effort 503 so clients and load balancers see an
+                        // HTTP signal instead of a bare connection reset.
+                        reject_over_capacity(stream).await;
                         continue;
                     }
 
@@ -743,6 +749,28 @@ fn is_resource_exhaustion(err: &io::Error) -> bool {
             err.raw_os_error(),
             Some(EMFILE) | Some(ENFILE) | Some(ENOMEM) | Some(ENOBUFS)
         )
+}
+
+/// Write a minimal `503 Service Unavailable` and close.
+///
+/// Used when the configured connection limit is exhausted. Never panics and
+/// never blocks longer than two seconds — if the write fails, the socket is
+/// dropped as before.
+async fn reject_over_capacity(mut stream: TcpStream) {
+    use tokio::io::AsyncWriteExt as _;
+
+    let body = "{\"error\":\"Service Unavailable\",\"code\":503}";
+    let response = format!(
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n         Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+
+    let _ = tokio::time::timeout(Duration::from_secs(2), async move {
+        let _ = stream.write_all(response.as_bytes()).await;
+        let _ = stream.shutdown().await;
+    })
+    .await;
 }
 
 fn apply_stream_options(stream: &TcpStream, config: &ServerConfig) -> io::Result<()> {

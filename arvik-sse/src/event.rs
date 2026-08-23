@@ -83,10 +83,18 @@ impl Event {
     /// The browser uses this to send `Last-Event-ID` on reconnect so you
     /// can resume from where the stream left off.
     ///
-    /// `U+0000 NULL` bytes are stripped — browsers silently ignore ids
-    /// that contain null (SSE spec §9.2).
+    /// `U+0000 NULL` bytes are stripped, and the value is truncated at the
+    /// first CR/LF: an id containing `\n\n` would terminate the event framing
+    /// and silently drop every field serialized after it — an injection vector
+    /// whenever ids derive from untrusted input (e.g. an echoed
+    /// `Last-Event-ID` header).
     pub fn id(mut self, id: impl Into<String>) -> Self {
-        let s: String = id.into().chars().filter(|&c| c != '\0').collect();
+        let s: String = id
+            .into()
+            .chars()
+            .take_while(|&c| c != '\n' && c != '\r')
+            .filter(|&c| c != '\0')
+            .collect();
         self.id = Some(s);
         self
     }

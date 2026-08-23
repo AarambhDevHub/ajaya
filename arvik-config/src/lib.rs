@@ -248,6 +248,28 @@ impl ArvikConfig {
             self.http2.initial_connection_window_size,
             "http2.initial_connection_window_size",
         )?;
+        // h2 asserts `size <= (1 << 31) - 1` when the connection is built;
+        // reject oversized values here with a clear message instead of
+        // panicking at runtime on the first HTTP/2 request.
+        const H2_MAX_WINDOW: u64 = (1 << 31) - 1;
+        for (field, value) in [
+            (
+                "http2.initial_stream_window_size",
+                self.http2.initial_stream_window_size,
+            ),
+            (
+                "http2.initial_connection_window_size",
+                self.http2.initial_connection_window_size,
+            ),
+        ] {
+            if let Some(size) = value
+                && size as u64 > H2_MAX_WINDOW
+            {
+                return Err(ConfigError::Validation(format!(
+                    "{field} must be at most {H2_MAX_WINDOW} (h2 protocol maximum), got {size}"
+                )));
+            }
+        }
         validate_nonzero(
             self.http2.max_concurrent_streams,
             "http2.max_concurrent_streams",
@@ -599,16 +621,34 @@ fn merge_values(base: &mut Value, overlay: Value) {
 
 fn apply_env(root: &mut Value, prefix: &str) -> Result<()> {
     let prefix = format!("{}_", prefix.trim_end_matches('_'));
+    let mut unknown: Vec<String> = Vec::new();
     for (var, value) in std::env::vars() {
         if !var.starts_with(&prefix) {
             continue;
         }
 
         let suffix = &var[prefix.len()..];
-        let Some((path, value)) = parse_env_override(suffix, &var, &value)? else {
-            continue;
-        };
-        set_path(root, path, value);
+        match parse_env_override(suffix, &var, &value)? {
+            Some((path, value)) => set_path(root, path, value),
+            None if suffix_starts_with_known_section(suffix) => {
+                // A typo inside a known section must not silently fall back to
+                // file/default values — the same mistake in a TOML file fails
+                // loudly.
+                unknown.push(var);
+            }
+            // Variables outside the config schema (other tooling sharing the
+            // prefix) are ignored, as they always were.
+            None => {}
+        }
+    }
+
+    if !unknown.is_empty() {
+        return Err(ConfigError::Validation(format!(
+            "unknown configuration environment variable(s): {}. Expected names              prefixed with `{}` (e.g. {}SERVER_PORT); check for typos.",
+            unknown.join(", "),
+            prefix,
+            prefix
+        )));
     }
 
     Ok(())
@@ -707,6 +747,17 @@ fn parse_env_override(
     };
 
     Ok(parsed)
+}
+
+/// True when the variable's first path segment names a config section, so an
+/// unmatched remainder is almost certainly a typo (e.g. `SERVER_MAXCONNECTIONS`
+/// instead of `SERVER_MAX_CONNECTIONS`) rather than another tool's variable.
+fn suffix_starts_with_known_section(suffix: &str) -> bool {
+    let section = suffix.split('_').next().unwrap_or_default();
+    matches!(
+        section.to_ascii_lowercase().as_str(),
+        "server" | "http1" | "http2" | "shutdown" | "tls"
+    )
 }
 
 fn parse_bool(var: &str, value: &str) -> Result<bool> {
@@ -952,6 +1003,60 @@ mod tests {
         }
 
         assert_eq!(config.server.port, 9090);
+    }
+
+    #[test]
+    fn typo_in_known_section_fails_loudly() {
+        let prefix = unique_prefix();
+        let key = format!("{prefix}_SERVER_MAXCONNECTIONS");
+
+        unsafe {
+            std::env::set_var(&key, "50");
+        }
+        let result = ArvikConfig::builder().env_prefix(&prefix).build();
+        unsafe {
+            std::env::remove_var(&key);
+        }
+
+        let err = result.expect_err("typo'd env var in a known section must fail");
+        let text = err.to_string();
+        assert!(text.contains("SERVER_MAXCONNECTIONS"), "got: {text}");
+    }
+
+    #[test]
+    fn foreign_vars_in_prefix_namespace_are_ignored() {
+        // Another tool sharing the prefix must not break config loading.
+        let prefix = unique_prefix();
+        let key = format!("{prefix}_FOREIGN_TOOL_FLAG");
+
+        unsafe {
+            std::env::set_var(&key, "1");
+        }
+        let result = ArvikConfig::builder().env_prefix(&prefix).build();
+        unsafe {
+            std::env::remove_var(&key);
+        }
+
+        result.unwrap();
+    }
+
+    #[test]
+    fn h2_window_above_protocol_maximum_is_rejected() {
+        let config = ArvikConfig {
+            http2: Http2Section {
+                initial_stream_window_size: Some((1 << 31) as u32), // h2 max is (1<<31)-1
+                ..Http2Section::default()
+            },
+            ..ArvikConfig::default()
+        };
+
+        let err = config
+            .validate()
+            .expect_err("oversized window must fail validation");
+        assert!(
+            err.to_string().contains("initial_stream_window_size"),
+            "got: {err}"
+        );
     }
 
     #[test]

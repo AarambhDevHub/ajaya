@@ -184,14 +184,17 @@ impl From<http::Error> for Error {
 }
 
 impl From<String> for Error {
-    fn from(msg: String) -> Self {
-        Self::new(msg.clone()).with_message(msg)
+    fn from(err: String) -> Self {
+        // Internal by default: interpolated strings frequently embed driver
+        // messages, SQL fragments, or paths. Call `.public()` on the error to
+        // intentionally expose text to clients.
+        Self::new(err)
     }
 }
 
 impl From<&'static str> for Error {
-    fn from(msg: &'static str) -> Self {
-        Self::new(msg).with_message(msg)
+    fn from(err: &'static str) -> Self {
+        Self::new(err)
     }
 }
 

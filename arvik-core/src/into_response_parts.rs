@@ -156,10 +156,22 @@ where
 
     fn into_response_parts(self, mut parts: ResponseParts) -> Result<ResponseParts, Self::Error> {
         for (key, value) in self.0 {
-            // Skip silently on invalid header name/value — mirrors
-            // the existing array-tuple behaviour.
-            let (Ok(name), Ok(val)) = (key.try_into(), value.try_into()) else {
-                continue;
+            let (name, val) = match (key.try_into(), value.try_into()) {
+                (Ok(name), Ok(val)) => (name, val),
+                (Err(e), _) => {
+                    tracing::warn!(
+                        error = %e,
+                        "AppendHeaders: invalid header name; header dropped"
+                    );
+                    continue;
+                }
+                (_, Err(e)) => {
+                    tracing::warn!(
+                        error = %e,
+                        "AppendHeaders: invalid header value; header dropped"
+                    );
+                    continue;
+                }
             };
             parts.headers_mut().append(name, val);
         }
