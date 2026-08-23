@@ -97,20 +97,28 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let method = req.method().as_str().to_owned();
-        let url = req.uri().to_string();
-        let user_agent = req
-            .headers()
-            .get(http::header::USER_AGENT)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_owned();
-        let parent = extract_parent(req.headers(), &self.propagators);
-        let span = make_http_span(&self.service_name, &method, &url, &user_agent);
+        // Skip all span construction (including the field strings and the
+        // propagator extraction) when INFO spans are filtered out anyway.
+        let span = if !tracing::enabled!(tracing::Level::INFO) {
+            tracing::Span::none()
+        } else {
+            let method = req.method().as_str().to_owned();
+            // Path only — query strings routinely carry credentials and must
+            // not land in traces by default.
+            let url = req.uri().path().to_string();
+            let user_agent = req
+                .headers()
+                .get(http::header::USER_AGENT)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_owned();
+            let span = make_http_span(&self.service_name, &method, &url, &user_agent);
 
-        if let Some(parent) = parent {
-            let _ = span.set_parent(parent);
-        }
+            if let Some(parent) = extract_parent(req.headers(), &self.propagators) {
+                let _ = span.set_parent(parent);
+            }
+            span
+        };
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
@@ -234,9 +242,14 @@ impl OtelConfig {
         let builder = SdkTracerProvider::builder().with_resource(resource);
 
         match &self.exporter {
-            Exporter::Stdout => Ok(builder
-                .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
-                .build()),
+            Exporter::Stdout => {
+                // Batch, not simple: the simple processor serializes and
+                // writes each span inline on whichever task ends it — a
+                // synchronous stdout write on the request hot path.
+                Ok(builder
+                    .with_batch_exporter(opentelemetry_stdout::SpanExporter::default())
+                    .build())
+            }
             Exporter::OtlpGrpc(endpoint) => {
                 let mut exporter = opentelemetry_otlp::SpanExporter::builder().with_tonic();
                 if let Some(endpoint) = endpoint {
@@ -262,16 +275,38 @@ impl OtelConfig {
         }
     }
 
+    /// Return the configured service name.
+    pub fn service_name(&self) -> &str {
+        &self.service_name
+    }
+
     /// Install the tracer provider and a `tracing-opentelemetry` subscriber layer.
+    ///
+    /// The global subscriber is installed first; if that fails (typically
+    /// because another subscriber — e.g. [`crate::logging::ArvikLogger`] — is
+    /// already installed), the freshly built provider is shut down and the
+    /// global reference released instead of leaking its exporter task.
+    ///
+    /// To combine structured logging with OpenTelemetry in one subscriber,
+    /// use `crate::logging::ArvikLogger::init_with_otel`.
     pub fn install(self) -> Result<OtelGuard, OtelError> {
         let provider = self.build_provider()?;
         let tracer = provider.tracer(self.service_name.clone());
-        global::set_tracer_provider(provider.clone());
 
-        tracing_subscriber::registry()
+        let install_result = tracing_subscriber::registry()
             .with(tracing_opentelemetry::layer().with_tracer(tracer))
-            .try_init()
-            .map_err(|err| OtelError::Subscriber(err.to_string()))?;
+            .try_init();
+
+        if let Err(err) = install_result {
+            // Stop exporter threads, then overwrite the global reference so
+            // nothing keeps the provider alive for the rest of the process.
+            let _ = provider.shutdown();
+            global::set_tracer_provider(SdkTracerProvider::builder().build());
+            return Err(OtelError::Subscriber(err.to_string()));
+        }
+
+        // Only publish globally once installation actually succeeded.
+        global::set_tracer_provider(provider.clone());
 
         Ok(OtelGuard {
             provider: Some(provider),
@@ -282,6 +317,15 @@ impl OtelConfig {
 /// Guard that shuts down the installed OpenTelemetry tracer provider.
 pub struct OtelGuard {
     provider: Option<SdkTracerProvider>,
+}
+
+impl OtelGuard {
+    /// Wrap an externally built provider so its lifetime is managed here.
+    pub(crate) fn from_provider(provider: SdkTracerProvider) -> Self {
+        Self {
+            provider: Some(provider),
+        }
+    }
 }
 
 impl OtelGuard {

@@ -74,14 +74,17 @@ impl ShutdownConfig {
     }
 
     pub(crate) fn call_connected(&self, info: ConnectionInfo) {
-        if let Some(hook) = &self.on_connected {
-            hook(info);
+        if let Some(hook) = self.on_connected.clone() {
+            // Fire-and-forget: hooks are arbitrary user closures, and a
+            // blocking one must not stall the single accept loop.
+            tokio::spawn(async move { hook(info) });
         }
     }
 
     pub(crate) fn call_disconnected(&self, info: ConnectionInfo) {
-        if let Some(hook) = &self.on_disconnected {
-            hook(info);
+        if let Some(hook) = self.on_disconnected.clone() {
+            // Same as above — invoked from ConnectionGuard::drop.
+            tokio::spawn(async move { hook(info) });
         }
     }
 }

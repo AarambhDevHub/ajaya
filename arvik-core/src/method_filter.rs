@@ -35,8 +35,13 @@ impl MethodFilter {
     pub const OPTIONS: Self = Self(1 << 6);
     /// Matches HTTP TRACE requests.
     pub const TRACE: Self = Self(1 << 7);
-    /// Matches any HTTP method.
-    pub const ANY: Self = Self(0xFF);
+    /// Matches non-standard extension methods (e.g. `PURGE`, `PROPFIND`,
+    /// `CONNECT`). Produced by [`MethodFilter::from_method`] for any method
+    /// outside the eight standard ones, so extension requests fall through
+    /// to `405 Method Not Allowed` instead of matching a standard filter.
+    pub const EXTENSION: Self = Self(1 << 8);
+    /// Matches any HTTP method, including non-standard extension methods.
+    pub const ANY: Self = Self(0xFF | (1 << 8));
     /// Matches no HTTP method (empty filter).
     pub const NONE: Self = Self(0);
 
@@ -66,7 +71,11 @@ impl MethodFilter {
             http::Method::HEAD => Self::HEAD,
             http::Method::OPTIONS => Self::OPTIONS,
             http::Method::TRACE => Self::TRACE,
-            _ => Self(0), // Unknown methods match nothing
+            // Extension methods get their own bit so they never match a
+            // standard-method filter (an empty mask would be a subset of
+            // every filter and would dispatch to the first registered
+            // handler).
+            _ => Self::EXTENSION,
         }
     }
 }
@@ -120,5 +129,18 @@ mod tests {
             MethodFilter::from_method(&http::Method::POST),
             MethodFilter::POST
         );
+    }
+
+    #[test]
+    fn extension_methods_never_match_standard_filters() {
+        let purge = http::Method::from_bytes(b"PURGE").unwrap();
+        assert_eq!(MethodFilter::from_method(&purge), MethodFilter::EXTENSION);
+        // An unknown method must not subset-match a specific-method filter.
+        assert!(!MethodFilter::GET.contains(MethodFilter::EXTENSION));
+        assert!(!MethodFilter::DELETE.contains(MethodFilter::EXTENSION));
+        assert!(!MethodFilter::DELETE.matches(&purge));
+        // ANY remains a true catch-all, per its contract.
+        assert!(MethodFilter::ANY.contains(MethodFilter::EXTENSION));
+        assert!(MethodFilter::ANY.matches(&purge));
     }
 }

@@ -107,6 +107,77 @@ impl ArvikLoggerBuilder {
                 .try_init(),
             LogFormat::Auto => unreachable!("LogFormat::resolve never returns Auto"),
         }
+        // try_init already returns our exact LoggerError box type.
+        .map_err(|err| err as LoggerError)
+    }
+
+    /// Install logging and OpenTelemetry as **one** subscriber.
+    ///
+    /// [`ArvikLogger::init`] and [`OtelConfig::install`](crate::trace::OtelConfig::install)
+    /// each try to claim the global subscriber, so calling both always fails
+    /// for whichever runs second. This method composes the log layer and the
+    /// OTel span layer into a single subscriber instead. The returned guard
+    /// shuts the tracer provider down on drop; on failure nothing is left
+    /// installed.
+    #[cfg(all(feature = "logging", feature = "opentelemetry"))]
+    pub fn init_with_otel(
+        self,
+        otel: crate::trace::OtelConfig,
+    ) -> Result<crate::trace::OtelGuard, LoggerError> {
+        use opentelemetry::global;
+        use opentelemetry::trace::TracerProvider as _;
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+
+        let provider = otel
+            .build_provider()
+            .map_err(|err| -> LoggerError { Box::new(err) })?;
+
+        let format = self.format.resolve();
+        let env_filter = EnvFilter::try_new(self.env_filter_directive())?;
+
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_target(self.with_target)
+            .with_thread_ids(self.with_thread_ids);
+
+        // The Json/Pretty layers have distinct types, so each arm composes and
+        // installs its own subscriber.
+        let install_result = match format {
+            LogFormat::Json => {
+                let otel_layer = tracing_opentelemetry::layer()
+                    .with_tracer(provider.tracer(otel.service_name().to_string()));
+                tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(fmt_layer.json())
+                    .with(otel_layer)
+                    .try_init()
+            }
+            LogFormat::Pretty => {
+                let otel_layer = tracing_opentelemetry::layer()
+                    .with_tracer(provider.tracer(otel.service_name().to_string()));
+                tracing_subscriber::registry()
+                    .with(env_filter)
+                    .with(fmt_layer.pretty())
+                    .with(otel_layer)
+                    .try_init()
+            }
+            LogFormat::Auto => unreachable!("LogFormat::resolve never returns Auto"),
+        };
+
+        if let Err(err) = install_result {
+            // Mirror OtelConfig::install's failure hygiene: release exporter
+            // threads and drop the global reference before surfacing the error.
+            let _ = provider.shutdown();
+            global::set_tracer_provider(
+                opentelemetry_sdk::trace::SdkTracerProvider::builder().build(),
+            );
+            return Err(Box::new(crate::trace::OtelError::Subscriber(
+                err.to_string(),
+            )));
+        }
+
+        global::set_tracer_provider(provider.clone());
+        Ok(crate::trace::OtelGuard::from_provider(provider))
     }
 
     fn env_filter_directive(&self) -> String {
@@ -239,8 +310,17 @@ where
     }
 
     fn call(&mut self, mut req: Request) -> Self::Future {
-        let method = req.method().as_str().to_string();
-        let uri = req.uri().to_string();
+        // Request-ID plumbing runs unconditionally (it is functional), but the
+        // span field strings are only built when INFO spans are actually
+        // enabled — otherwise every filtered-out request still paid several
+        // heap allocations.
+        let span_enabled = tracing::enabled!(tracing::Level::INFO);
+
+        let (method, uri) = if span_enabled {
+            (req.method().as_str().to_string(), req.uri().to_string())
+        } else {
+            (String::new(), String::new())
+        };
         let request_id = request_id(&req, &self.request_id_header);
 
         req.extensions_mut()
@@ -250,13 +330,17 @@ where
                 .insert(self.request_id_header.clone(), value);
         }
 
-        let span = request_span(
-            &method,
-            &uri,
-            &request_id,
-            self.include_headers
-                .then(|| masked_headers(req.headers(), &self.sensitive_headers)),
-        );
+        let span = if span_enabled {
+            request_span(
+                &method,
+                &uri,
+                &request_id,
+                self.include_headers
+                    .then(|| masked_headers(req.headers(), &self.sensitive_headers)),
+            )
+        } else {
+            tracing::Span::none()
+        };
 
         let request_id_header = self.request_id_header.clone();
         let request_id_for_response = request_id.clone();
@@ -313,15 +397,30 @@ where
     }
 }
 
+/// Longest accepted client-supplied request id.
+const MAX_REQUEST_ID_LEN: usize = 128;
+
+/// True when the id is safe to echo into headers and every log line:
+/// printable ASCII, no whitespace/control characters, bounded length.
+/// Anything else gets replaced with a fresh UUID so attackers can neither
+/// forge correlation keys nor inflate log volume.
+fn is_valid_request_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_REQUEST_ID_LEN
+        && id.bytes().all(|b| (0x21..=0x7e).contains(&b))
+}
+
 fn request_id(req: &Request, header: &HeaderName) -> String {
     req.headers()
         .get(header)
         .and_then(|value| value.to_str().ok())
+        .filter(|id| is_valid_request_id(id))
         .map(str::to_owned)
         .or_else(|| {
             req.extensions()
                 .get::<RequestId>()
                 .map(|id| id.as_str().to_string())
+                .filter(|id| is_valid_request_id(id))
         })
         .unwrap_or_else(|| Uuid::new_v4().to_string())
 }

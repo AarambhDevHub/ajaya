@@ -42,6 +42,9 @@ pub struct ServeDir {
     directory_listing: bool,
     chunk_size: usize,
     cache_control: Option<HeaderValue>,
+    /// When false (default), requests resolving through a symlink to outside
+    /// the (canonicalized) root are rejected.
+    follow_symlinks: bool,
 }
 
 #[cfg(feature = "fs")]
@@ -58,7 +61,18 @@ impl ServeDir {
             directory_listing: false,
             chunk_size: DEFAULT_CHUNK_SIZE,
             cache_control: None,
+            follow_symlinks: false,
         }
+    }
+
+    /// Allow serving paths that resolve through symlinks.
+    ///
+    /// By default, a request whose resolved location escapes the serve root
+    /// via a symlink is treated as not found. Enable this only when the tree
+    /// is trusted (e.g. intentional mounts).
+    pub fn follow_symlinks(mut self, enabled: bool) -> Self {
+        self.follow_symlinks = enabled;
+        self
     }
 
     /// Set a service called when a file is not found.
@@ -139,6 +153,14 @@ impl ServeDir {
         };
 
         let candidate = self.root.join(&relative.fs_path);
+
+        // Symlink containment: a planted link must not serve bytes from
+        // outside the (canonicalized) root. Checked on the canonical path so
+        // escapes through intermediate directories are caught too.
+        if !self.follow_symlinks && !path_contained(&self.root, &candidate).await {
+            return self.call_fallback(req).await;
+        }
+
         let metadata = match tokio::fs::metadata(&candidate).await {
             Ok(metadata) => metadata,
             Err(_) => return self.call_fallback(req).await,
@@ -217,50 +239,48 @@ impl ServeDir {
         asset_path: &str,
         accepts_br: bool,
         accepts_gzip: bool,
-    ) -> Result<FsAsset, ()> {
+    ) -> Result<FsCandidate, ()> {
         let content_type = content_type(asset_path);
 
         if accepts_br {
             let br_path = append_suffix(&path, ".br");
-            if let Ok(metadata) = tokio::fs::metadata(&br_path).await
-                && metadata.is_file()
+            if tokio::fs::metadata(&br_path)
+                .await
+                .is_ok_and(|m| m.is_file())
             {
-                return Ok(FsAsset::new(
-                    br_path,
-                    metadata,
+                return Ok(FsCandidate {
+                    path: br_path,
                     content_type,
-                    Some(HeaderValue::from_static("br")),
-                    self.precompressed_gzip || self.precompressed_br,
-                ));
+                    content_encoding: Some(HeaderValue::from_static("br")),
+                    vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
+                });
             }
         }
 
         if accepts_gzip {
             let gz_path = append_suffix(&path, ".gz");
-            if let Ok(metadata) = tokio::fs::metadata(&gz_path).await
-                && metadata.is_file()
+            if tokio::fs::metadata(&gz_path)
+                .await
+                .is_ok_and(|m| m.is_file())
             {
-                return Ok(FsAsset::new(
-                    gz_path,
-                    metadata,
+                return Ok(FsCandidate {
+                    path: gz_path,
                     content_type,
-                    Some(HeaderValue::from_static("gzip")),
-                    self.precompressed_gzip || self.precompressed_br,
-                ));
+                    content_encoding: Some(HeaderValue::from_static("gzip")),
+                    vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
+                });
             }
         }
 
-        let metadata = tokio::fs::metadata(&path).await.map_err(|_| ())?;
-        if !metadata.is_file() {
+        if !tokio::fs::metadata(&path).await.is_ok_and(|m| m.is_file()) {
             return Err(());
         }
-        Ok(FsAsset::new(
+        Ok(FsCandidate {
             path,
-            metadata,
             content_type,
-            None,
-            self.precompressed_gzip || self.precompressed_br,
-        ))
+            content_encoding: None,
+            vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
+        })
     }
 
     async fn call_fallback(&self, req: Request) -> Response {
@@ -374,48 +394,49 @@ impl ServeFile {
         }
     }
 
-    async fn select_file(&self, accepts_br: bool, accepts_gzip: bool) -> Result<FsAsset, ()> {
+    async fn select_file(&self, accepts_br: bool, accepts_gzip: bool) -> Result<FsCandidate, ()> {
         if accepts_br {
             let br_path = append_suffix(&self.path, ".br");
-            if let Ok(metadata) = tokio::fs::metadata(&br_path).await
-                && metadata.is_file()
+            if tokio::fs::metadata(&br_path)
+                .await
+                .is_ok_and(|m| m.is_file())
             {
-                return Ok(FsAsset::new(
-                    br_path,
-                    metadata,
-                    self.mime.clone(),
-                    Some(HeaderValue::from_static("br")),
-                    self.precompressed_gzip || self.precompressed_br,
-                ));
+                return Ok(FsCandidate {
+                    path: br_path,
+                    content_type: self.mime.clone(),
+                    content_encoding: Some(HeaderValue::from_static("br")),
+                    vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
+                });
             }
         }
 
         if accepts_gzip {
             let gz_path = append_suffix(&self.path, ".gz");
-            if let Ok(metadata) = tokio::fs::metadata(&gz_path).await
-                && metadata.is_file()
+            if tokio::fs::metadata(&gz_path)
+                .await
+                .is_ok_and(|m| m.is_file())
             {
-                return Ok(FsAsset::new(
-                    gz_path,
-                    metadata,
-                    self.mime.clone(),
-                    Some(HeaderValue::from_static("gzip")),
-                    self.precompressed_gzip || self.precompressed_br,
-                ));
+                return Ok(FsCandidate {
+                    path: gz_path,
+                    content_type: self.mime.clone(),
+                    content_encoding: Some(HeaderValue::from_static("gzip")),
+                    vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
+                });
             }
         }
 
-        let metadata = tokio::fs::metadata(&*self.path).await.map_err(|_| ())?;
-        if !metadata.is_file() {
+        if !tokio::fs::metadata(&*self.path)
+            .await
+            .is_ok_and(|m| m.is_file())
+        {
             return Err(());
         }
-        Ok(FsAsset::new(
-            (*self.path).clone(),
-            metadata,
-            self.mime.clone(),
-            None,
-            self.precompressed_gzip || self.precompressed_br,
-        ))
+        Ok(FsCandidate {
+            path: (*self.path).clone(),
+            content_type: self.mime.clone(),
+            content_encoding: None,
+            vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
+        })
     }
 }
 
@@ -719,67 +740,68 @@ async fn call_boxed(mut service: BoxCloneService, req: Request) -> Response {
         .unwrap_or_else(|infallible| match infallible {})
 }
 
+/// A filesystem candidate selected for serving — everything except metadata.
+///
+/// Metadata (length, mtime, ETag) is read from the *open* file at serving
+/// time, closing the stat/open window where a deploy could swap or truncate
+/// the file between selecting it and streaming it.
 #[cfg(feature = "fs")]
-struct FsAsset {
+struct FsCandidate {
     path: PathBuf,
-    len: u64,
-    modified: Option<SystemTime>,
-    etag: HeaderValue,
     content_type: HeaderValue,
     content_encoding: Option<HeaderValue>,
     vary_accept_encoding: bool,
 }
 
 #[cfg(feature = "fs")]
-impl FsAsset {
-    fn new(
-        path: PathBuf,
-        metadata: std::fs::Metadata,
-        content_type: HeaderValue,
-        content_encoding: Option<HeaderValue>,
-        vary_accept_encoding: bool,
-    ) -> Self {
-        let modified = metadata.modified().ok();
-        let etag = fs_etag(metadata.len(), modified);
-        Self {
-            path,
-            len: metadata.len(),
-            modified,
-            etag,
-            content_type,
-            content_encoding,
-            vary_accept_encoding,
-        }
-    }
-}
-
-#[cfg(feature = "fs")]
 async fn serve_fs_asset(
-    asset: FsAsset,
+    candidate: FsCandidate,
     req: Request,
     head: bool,
     chunk_size: usize,
     cache_control: Option<HeaderValue>,
 ) -> Response {
-    if is_not_modified(&req, &asset.etag, asset.modified) {
+    // Open first, then stat the open descriptor: the validators below are
+    // guaranteed to describe exactly the bytes this call will stream.
+    let file = match tokio::fs::File::open(&candidate.path).await {
+        Ok(file) => file,
+        Err(_) => return not_found(),
+    };
+    let metadata = match file.metadata().await {
+        Ok(metadata) => metadata,
+        Err(_) => return not_found(),
+    };
+
+    let len = metadata.len();
+    let modified = metadata.modified().ok();
+    let etag = fs_etag(len, modified);
+
+    if is_not_modified(&req, &etag, modified) {
         return not_modified(
-            &asset.etag,
-            asset.modified,
+            &etag,
+            modified,
             cache_control,
-            asset.vary_accept_encoding,
+            candidate.vary_accept_encoding,
         );
     }
 
-    let range = match parse_range(req.headers().get(header::RANGE), asset.len) {
-        RangeDecision::Full => None,
-        RangeDecision::Partial(range) => Some(range),
-        RangeDecision::Unsatisfiable => return range_not_satisfiable(asset.len),
+    // RFC 9110 §13.1.5: If-Range must gate the range — a stale validator
+    // means the client's cached copy predates this file, so only a full 200
+    // response can be safely stitched onto it.
+    let range = if if_range_allows_partial(&req, &etag, modified) {
+        match parse_range(req.headers().get(header::RANGE), len) {
+            RangeDecision::Full => None,
+            RangeDecision::Partial(range) => Some(range),
+            RangeDecision::Unsatisfiable => return range_not_satisfiable(len),
+        }
+    } else {
+        None
     };
 
     let body_len = range
         .as_ref()
         .map(|range| range.end - range.start + 1)
-        .unwrap_or(asset.len);
+        .unwrap_or(len);
 
     let mut builder = ResponseBuilder::new()
         .status(if range.is_some() {
@@ -787,27 +809,27 @@ async fn serve_fs_asset(
         } else {
             StatusCode::OK
         })
-        .header(header::CONTENT_TYPE, asset.content_type)
+        .header(header::CONTENT_TYPE, candidate.content_type)
         .header(header::CONTENT_LENGTH, body_len.to_string())
         .header(header::ACCEPT_RANGES, "bytes")
-        .header(header::ETAG, asset.etag.clone());
+        .header(header::ETAG, etag.clone());
 
-    if let Some(modified) = asset.modified {
+    if let Some(modified) = modified {
         builder = builder.header(header::LAST_MODIFIED, httpdate::fmt_http_date(modified));
     }
     if let Some(cache_control) = cache_control {
         builder = builder.header(header::CACHE_CONTROL, cache_control);
     }
-    if let Some(content_encoding) = asset.content_encoding {
+    if let Some(content_encoding) = candidate.content_encoding {
         builder = builder.header(header::CONTENT_ENCODING, content_encoding);
     }
-    if asset.vary_accept_encoding {
+    if candidate.vary_accept_encoding {
         builder = builder.header(header::VARY, "Accept-Encoding");
     }
     if let Some(range) = &range {
         builder = builder.header(
             header::CONTENT_RANGE,
-            format!("bytes {}-{}/{}", range.start, range.end, asset.len),
+            format!("bytes {}-{}/{}", range.start, range.end, len),
         );
     }
 
@@ -815,17 +837,39 @@ async fn serve_fs_asset(
         return builder.empty();
     }
 
-    let file = match tokio::fs::File::open(&asset.path).await {
-        Ok(file) => file,
-        Err(_) => return not_found(),
-    };
-
     let body: Body = match range {
         Some(range) => ranged_file_body(file, range, chunk_size).await,
         None => file_body(file, chunk_size),
     };
 
     builder.body(body)
+}
+
+/// Evaluate `If-Range`: `true` means a partial response may be served.
+///
+/// ETag comparators use strong comparison; HTTP-date comparators must match
+/// `Last-Modified` exactly. A missing header always allows ranges.
+fn if_range_allows_partial(
+    req: &Request,
+    etag: &HeaderValue,
+    modified: Option<SystemTime>,
+) -> bool {
+    let Some(value) = req.headers().get(header::IF_RANGE) else {
+        return true;
+    };
+    let Ok(value) = value.to_str() else {
+        return false;
+    };
+
+    if value.starts_with('"') || value.starts_with("W/") {
+        // Weak validators never satisfy If-Range's strong comparison.
+        return !value.starts_with("W/") && value.as_bytes() == etag.as_bytes();
+    }
+
+    match modified {
+        Some(m) => httpdate::parse_http_date(value).is_ok_and(|date| date == m),
+        None => false,
+    }
 }
 
 #[cfg(feature = "fs")]
@@ -910,10 +954,14 @@ fn serve_embedded_asset(
         );
     }
 
-    let range = match parse_range(req.headers().get(header::RANGE), asset.len) {
-        RangeDecision::Full => None,
-        RangeDecision::Partial(range) => Some(range),
-        RangeDecision::Unsatisfiable => return range_not_satisfiable(asset.len),
+    let range = if if_range_allows_partial(&req, &asset.etag, asset.modified) {
+        match parse_range(req.headers().get(header::RANGE), asset.len) {
+            RangeDecision::Full => None,
+            RangeDecision::Partial(range) => Some(range),
+            RangeDecision::Unsatisfiable => return range_not_satisfiable(asset.len),
+        }
+    } else {
+        None
     };
 
     let body_len = range
@@ -963,6 +1011,22 @@ fn serve_embedded_asset(
         None => asset.bytes.into(),
     };
     builder.body(body)
+}
+
+/// Verify that `path`, after resolving symlinks, still lives inside `root`.
+///
+/// Both sides are canonicalized so escapes through intermediate directory
+/// links are caught as well as direct file links. Unresolvable paths are
+/// treated as not contained.
+#[cfg(feature = "fs")]
+async fn path_contained(root: &Path, path: &Path) -> bool {
+    let Ok(canonical_root) = tokio::fs::canonicalize(root).await else {
+        return false;
+    };
+    match tokio::fs::canonicalize(path).await {
+        Ok(canonical_path) => canonical_path.starts_with(&canonical_root),
+        Err(_) => false,
+    }
 }
 
 #[derive(Debug)]
@@ -1057,24 +1121,18 @@ fn join_asset_path(base: &str, file: &str) -> String {
 }
 
 fn accepts_encoding(req: &Request, encoding: &str) -> bool {
-    req.headers()
-        .get(header::ACCEPT_ENCODING)
-        .and_then(|value| value.to_str().ok())
-        .map(|header| {
-            header.split(',').any(|part| {
-                let mut pieces = part.trim().split(';');
-                let token = pieces.next().unwrap_or("").trim();
-                let mut q = 1.0_f32;
-                for param in pieces {
-                    let param = param.trim();
-                    if let Some(value) = param.strip_prefix("q=") {
-                        q = value.parse::<f32>().unwrap_or(0.0);
-                    }
-                }
-                q > 0.0 && (token.eq_ignore_ascii_case(encoding) || token == "*")
-            })
-        })
-        .unwrap_or(false)
+    // Combine every header line (RFC 9110 §5.2 allows multi-line lists) and
+    // negotiate with q-value semantics — the old single-line `any()` check let
+    // `*;q=1` override an explicit `br;q=0` refusal.
+    let combined = req
+        .headers()
+        .get_all(header::ACCEPT_ENCODING)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    arvik_core::accept::negotiate(&[encoding], &combined).is_some()
 }
 
 #[derive(Clone, Copy)]
@@ -1094,11 +1152,16 @@ fn parse_range(value: Option<&HeaderValue>, len: u64) -> RangeDecision {
         return RangeDecision::Full;
     };
 
+    // RFC 9110 §14.2: an unrecognized range unit MUST be ignored (serve 200
+    // full), not answered with 416.
     let Some(spec) = value.strip_prefix("bytes=") else {
-        return RangeDecision::Unsatisfiable;
+        return RangeDecision::Full;
     };
+    // Multi-range requests would need multipart/byteranges bodies; serving a
+    // single span would corrupt clients expecting all ranges. Full 200 is the
+    // safe, spec-permitted answer.
     if spec.contains(',') || spec.is_empty() {
-        return RangeDecision::Unsatisfiable;
+        return RangeDecision::Full;
     }
 
     let Some((start, end)) = spec.split_once('-') else {
@@ -1181,8 +1244,11 @@ fn fs_etag(len: u64, modified: Option<SystemTime>) -> HeaderValue {
     let modified = modified
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .unwrap_or_default();
+    // Strong validator (nginx-style mtime+len). Strong comparison is required
+    // for `If-Range` to allow partial responses at all, and lets range-aware
+    // clients resume downloads against this file.
     HeaderValue::from_str(&format!(
-        "W/\"{:x}-{:x}-{:x}\"",
+        "\"{:x}-{:x}-{:x}\"",
         len,
         modified.as_secs(),
         modified.subsec_nanos()
@@ -1577,5 +1643,92 @@ mod tests {
 
         let res = service.call(request("/dir/")).await.unwrap();
         assert!(embedded_text(res).await.contains("file.txt"));
+    }
+    // ── audit group 7: If-Range, symlink containment ─────────────────────────
+
+    #[test]
+    fn if_range_strong_etag_comparison() {
+        let etag = HeaderValue::from_static("\"abc123\"");
+        let modified = None;
+
+        // No header → ranges allowed.
+        let req = request("/f");
+        assert!(if_range_allows_partial(&req, &etag, modified));
+
+        // Exact strong match → allowed.
+        let mut req = request("/f");
+        req.headers_mut()
+            .insert(header::IF_RANGE, HeaderValue::from_static("\"abc123\""));
+        assert!(if_range_allows_partial(&req, &etag, modified));
+
+        // Different validator → not allowed.
+        let mut req = request("/f");
+        req.headers_mut()
+            .insert(header::IF_RANGE, HeaderValue::from_static("\"other\""));
+        assert!(!if_range_allows_partial(&req, &etag, modified));
+
+        // Weak validators never satisfy strong comparison.
+        let mut req = request("/f");
+        req.headers_mut()
+            .insert(header::IF_RANGE, HeaderValue::from_static("W/\"abc123\""));
+        assert!(!if_range_allows_partial(&req, &etag, modified));
+    }
+
+    #[tokio::test]
+    async fn stale_if_range_downgrades_range_to_full_response() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.bin");
+        write(&path, b"0123456789");
+
+        let mut service = ServeFile::new(&path);
+
+        // Discover the current ETag.
+        let res = service.call(request("/ignored")).await.unwrap();
+        let etag = res.headers()[header::ETAG].clone();
+
+        // Matching If-Range → partial content.
+        let mut req = request("/ignored");
+        req.headers_mut()
+            .insert(header::RANGE, HeaderValue::from_static("bytes=0-3"));
+        req.headers_mut().insert(header::IF_RANGE, etag.clone());
+        let res = service.call(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::PARTIAL_CONTENT);
+        assert_eq!(body_text(res).await, "0123");
+
+        // Stale If-Range → full 200 (client must discard its cached version).
+        let mut req = request("/ignored");
+        req.headers_mut()
+            .insert(header::RANGE, HeaderValue::from_static("bytes=0-3"));
+        req.headers_mut()
+            .insert(header::IF_RANGE, HeaderValue::from_static("\"stale\""));
+        let res = service.call(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_text(res).await, "0123456789");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn symlink_escape_is_blocked_by_default() {
+        let outside = tempfile::tempdir().unwrap();
+        let secret = outside.path().join("secret.txt");
+        write(&secret, b"top secret");
+
+        let root = tempfile::tempdir().unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&secret, root.path().join("leak.txt")).unwrap();
+
+        let mut blocked = ServeDir::new(root.path());
+        let res = blocked.call(request("/leak.txt")).await.unwrap();
+        assert_ne!(
+            body_text(res).await,
+            "top secret",
+            "symlink escape must not serve outside the root by default"
+        );
+
+        // Opt-in restores link traversal.
+        let mut allowed = ServeDir::new(root.path()).follow_symlinks(true);
+        let res = allowed.call(request("/leak.txt")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_text(res).await, "top secret");
     }
 }

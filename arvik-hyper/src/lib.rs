@@ -5,7 +5,7 @@
 //! This crate provides:
 //! - TCP listener and connection management
 //! - Hyper service integration
-//! - Handler-based serving ([`serve`])
+//! - Handler-based serving ([`serve()`](crate::serve()))
 //! - Method router-based serving ([`serve_router`])
 //! - Graceful shutdown support
 //!

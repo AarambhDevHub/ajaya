@@ -54,7 +54,10 @@ impl IntoResponse for WebSocketUpgradeRejection {
     fn into_response(self) -> Response {
         let status = match &self {
             Self::MethodNotGet => StatusCode::METHOD_NOT_ALLOWED,
-            Self::InvalidWebSocketVersionHeader => StatusCode::BAD_REQUEST,
+            // RFC 6455 §4.4/§4.2.2: an unsupported version gets 426 Upgrade
+            // Required plus the version(s) this server speaks, so capable
+            // clients can retry instead of failing unrecoverably.
+            Self::InvalidWebSocketVersionHeader => StatusCode::UPGRADE_REQUIRED,
             Self::ConnectionNotUpgradable => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::BAD_REQUEST,
         };
@@ -65,9 +68,14 @@ impl IntoResponse for WebSocketUpgradeRejection {
             status.as_u16()
         );
 
-        ResponseBuilder::new()
+        let mut builder = ResponseBuilder::new()
             .status(status)
-            .header(http::header::CONTENT_TYPE, "application/json")
-            .body(arvik_core::Body::from(body))
+            .header(http::header::CONTENT_TYPE, "application/json");
+
+        if matches!(self, Self::InvalidWebSocketVersionHeader) {
+            builder = builder.header("sec-websocket-version", "13");
+        }
+
+        builder.body(arvik_core::Body::from(body))
     }
 }

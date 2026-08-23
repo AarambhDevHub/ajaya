@@ -255,8 +255,19 @@ where
         let (headers, body) = self;
         let mut r = body.into_response();
         for (key, value) in headers {
-            if let (Ok(name), Ok(val)) = (key.try_into(), value.try_into()) {
-                r.headers_mut().insert(name, val);
+            match (key.try_into(), value.try_into()) {
+                (Ok(name), Ok(val)) => {
+                    r.headers_mut().insert(name, val);
+                }
+                (Err(e), _) => tracing::warn!(
+                    header = %std::any::type_name::<K>(),
+                    error = ?e,
+                    "response tuple: invalid header name; header dropped"
+                ),
+                (_, Err(e)) => tracing::warn!(
+                    error = ?e,
+                    "response tuple: invalid header value; header dropped"
+                ),
             }
         }
         r
@@ -280,8 +291,19 @@ where
         let mut r = body.into_response();
         *r.status_mut() = status;
         for (key, value) in headers {
-            if let (Ok(name), Ok(val)) = (key.try_into(), value.try_into()) {
-                r.headers_mut().insert(name, val);
+            match (key.try_into(), value.try_into()) {
+                (Ok(name), Ok(val)) => {
+                    r.headers_mut().insert(name, val);
+                }
+                (Err(e), _) => tracing::warn!(
+                    header = %std::any::type_name::<K>(),
+                    error = ?e,
+                    "response tuple: invalid header name; header dropped"
+                ),
+                (_, Err(e)) => tracing::warn!(
+                    error = ?e,
+                    "response tuple: invalid header value; header dropped"
+                ),
             }
         }
         r
@@ -315,59 +337,6 @@ where
     fn into_response(self) -> Response {
         let (parts, body) = self;
         apply_parts(parts, body.into_response())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn trailers_are_appended_after_body() {
-        let mut trailers = HeaderMap::new();
-        trailers.insert("x-checksum", "abc123".parse().unwrap());
-
-        let response = Trailers::new("body", trailers).into_response();
-        let collected = response.into_body().collect().await.unwrap();
-        let collected_trailers = collected.trailers().cloned().unwrap();
-
-        assert_eq!(collected_trailers.get("x-checksum").unwrap(), "abc123");
-        assert_eq!(collected.to_bytes(), Bytes::from_static(b"body"));
-    }
-
-    #[tokio::test]
-    async fn json_response_serializes_to_bytes() {
-        let response = Json(serde_json::json!({ "name": "Arvik" })).into_response();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(http::header::CONTENT_TYPE).unwrap(),
-            "application/json"
-        );
-        assert_eq!(
-            response.into_body().to_bytes().await.unwrap(),
-            Bytes::from_static(br#"{"name":"Arvik"}"#)
-        );
-    }
-
-    #[tokio::test]
-    async fn json_response_handles_serialization_failure() {
-        struct Fails;
-
-        impl serde::Serialize for Fails {
-            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                Err(serde::ser::Error::custom("nope"))
-            }
-        }
-
-        let response = Json(Fails).into_response();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(
-            response.into_body().to_bytes().await.unwrap(),
-            Bytes::from_static(br#"{"error":"Serialization failed","code":500}"#)
-        );
     }
 }
 
@@ -488,5 +457,58 @@ impl<T: Into<String>> IntoResponse for Html<T> {
         ResponseBuilder::new()
             .header(http::header::CONTENT_TYPE, "text/html; charset=utf-8")
             .body(Body::from(self.0.into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn trailers_are_appended_after_body() {
+        let mut trailers = HeaderMap::new();
+        trailers.insert("x-checksum", "abc123".parse().unwrap());
+
+        let response = Trailers::new("body", trailers).into_response();
+        let collected = response.into_body().collect().await.unwrap();
+        let collected_trailers = collected.trailers().cloned().unwrap();
+
+        assert_eq!(collected_trailers.get("x-checksum").unwrap(), "abc123");
+        assert_eq!(collected.to_bytes(), Bytes::from_static(b"body"));
+    }
+
+    #[tokio::test]
+    async fn json_response_serializes_to_bytes() {
+        let response = Json(serde_json::json!({ "name": "Arvik" })).into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(http::header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        assert_eq!(
+            response.into_body().to_bytes().await.unwrap(),
+            Bytes::from_static(br#"{"name":"Arvik"}"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn json_response_handles_serialization_failure() {
+        struct Fails;
+
+        impl serde::Serialize for Fails {
+            fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                Err(serde::ser::Error::custom("nope"))
+            }
+        }
+
+        let response = Json(Fails).into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.into_body().to_bytes().await.unwrap(),
+            Bytes::from_static(br#"{"error":"Serialization failed","code":500}"#)
+        );
     }
 }

@@ -40,6 +40,25 @@ use http::{HeaderValue, StatusCode, header::AUTHORIZATION};
 use tower_layer::Layer;
 use tower_service::Service;
 
+/// Constant-time equality for secrets (tokens, passwords, CSRF tokens).
+///
+/// Accumulates an XOR of every byte pair, so where a mismatch occurs does not
+/// change timing. Only the *length* remains observable, which is treated as
+/// public information (scheme names like `Bearer ` and standard token formats
+/// are not secret).
+pub(crate) fn secret_eq(a: &str, b: &str) -> bool {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 // ── AuthStrategy ──────────────────────────────────────────────────────────────
 
 enum AuthStrategy {
@@ -56,7 +75,7 @@ impl AuthStrategy {
                 req.headers()
                     .get(AUTHORIZATION)
                     .and_then(|v| v.to_str().ok())
-                    .map(|v| v == expected.as_str())
+                    .map(|v| crate::auth::secret_eq(v, &expected))
                     .unwrap_or(false)
             }
             AuthStrategy::Basic { username, password } => {
@@ -66,7 +85,7 @@ impl AuthStrategy {
                 req.headers()
                     .get(AUTHORIZATION)
                     .and_then(|v| v.to_str().ok())
-                    .map(|v| v == expected.as_str())
+                    .map(|v| crate::auth::secret_eq(v, &expected))
                     .unwrap_or(false)
             }
             AuthStrategy::Custom(f) => f(req),
@@ -172,5 +191,47 @@ where
             }
             inner.call(req).await
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_eq_compares_every_byte_without_short_circuit() {
+        assert!(secret_eq("", ""));
+        assert!(secret_eq("Bearer abc123", "Bearer abc123"));
+        // Same length, single byte differs.
+        assert!(!secret_eq("Bearer abc123", "Bearer abc124"));
+        assert!(!secret_eq("Bearer abc123", "Xearer abc123"));
+    }
+
+    #[test]
+    fn secret_eq_is_length_aware() {
+        assert!(!secret_eq("abc", "abcd"));
+        assert!(!secret_eq("abcd", "abc"));
+    }
+
+    #[test]
+    fn bearer_strategy_uses_constant_time_compare() {
+        let strategy = AuthStrategy::Bearer("s3cret-token".to_string());
+        let mut req = Request::new(
+            http::Request::builder()
+                .uri("/")
+                .header(AUTHORIZATION, "Bearer s3cret-token")
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        );
+        assert!(strategy.is_authorized(&req));
+
+        req = Request::new(
+            http::Request::builder()
+                .uri("/")
+                .header(AUTHORIZATION, "Bearer wrong-token")
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        );
+        assert!(!strategy.is_authorized(&req));
     }
 }

@@ -32,7 +32,7 @@ use std::time::Instant;
 use arvik_core::{Request, Response};
 use tower_layer::Layer;
 use tower_service::Service;
-use tracing::{Level, Span};
+use tracing::{Instrument, Level, Span};
 
 // ── LatencyUnit ───────────────────────────────────────────────────────────────
 
@@ -99,13 +99,14 @@ impl DefaultMakeSpan {
         let path = req.uri().path().to_owned();
         let version = format!("{:?}", req.version());
 
-        match self.level {
+        let span = match self.level {
             Level::ERROR => tracing::error_span!(
                 "request",
                 http.method = %method,
                 http.path = %path,
                 http.version = %version,
                 http.status_code = tracing::field::Empty,
+                http.request_headers = tracing::field::Empty,
                 latency = tracing::field::Empty,
             ),
             Level::WARN => tracing::warn_span!(
@@ -114,6 +115,7 @@ impl DefaultMakeSpan {
                 http.path = %path,
                 http.version = %version,
                 http.status_code = tracing::field::Empty,
+                http.request_headers = tracing::field::Empty,
                 latency = tracing::field::Empty,
             ),
             Level::DEBUG => tracing::debug_span!(
@@ -122,6 +124,7 @@ impl DefaultMakeSpan {
                 http.path = %path,
                 http.version = %version,
                 http.status_code = tracing::field::Empty,
+                http.request_headers = tracing::field::Empty,
                 latency = tracing::field::Empty,
             ),
             Level::TRACE => tracing::trace_span!(
@@ -130,6 +133,7 @@ impl DefaultMakeSpan {
                 http.path = %path,
                 http.version = %version,
                 http.status_code = tracing::field::Empty,
+                http.request_headers = tracing::field::Empty,
                 latency = tracing::field::Empty,
             ),
             _ => tracing::info_span!(
@@ -138,9 +142,23 @@ impl DefaultMakeSpan {
                 http.path = %path,
                 http.version = %version,
                 http.status_code = tracing::field::Empty,
+                http.request_headers = tracing::field::Empty,
                 latency = tracing::field::Empty,
             ),
+        };
+
+        if self.include_headers {
+            // Recorded as one compact field; values are echoed as received.
+            let headers = req
+                .headers()
+                .iter()
+                .map(|(name, value)| format!("{}={}", name, value.to_str().unwrap_or("?")))
+                .collect::<Vec<_>>()
+                .join("; ");
+            span.record("http.request_headers", headers.as_str());
         }
+
+        span
     }
 }
 
@@ -233,10 +251,10 @@ where
 
         Box::pin(async move {
             let start = Instant::now();
-            let response = {
-                let _guard = span.enter();
-                inner.call(req).await?
-            };
+            // .instrument ties the span to this future only — unlike
+            // span.enter(), it cannot corrupt the thread-local span stack
+            // while the task awaits across worker threads.
+            let response = inner.call(req).instrument(span.clone()).await?;
 
             let elapsed = start.elapsed();
             let status = response.status();

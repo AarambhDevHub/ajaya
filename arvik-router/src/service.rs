@@ -1,9 +1,9 @@
 //! Tower service adapter for the router.
 //!
 //! Provides [`ServiceHandler`] which wraps any Tower `Service`
-//! into an Arvik [`Handler`], enabling services to be mounted
-//! inside the router via [`Router::route_service`] and
-//! [`Router::nest_service`].
+//! into an Arvik `Handler`, enabling services to be mounted
+//! inside the router via `Router::route_service` and
+//! `Router::nest_service`.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -15,7 +15,7 @@ use arvik_core::response::Response;
 use http::Uri;
 use tower_service::Service;
 
-/// Wraps a Tower [`Service`] to implement Arvik's [`Handler`] trait.
+/// Wraps a Tower [`Service`] to implement Arvik's `Handler` trait.
 ///
 /// This adapter allows any compatible Tower service to be used
 /// as a route handler within the router.
@@ -121,7 +121,9 @@ fn strip_uri_prefix(uri: &Uri, prefix: &str) -> Option<Uri> {
     let path = uri.path();
     let stripped_path = if prefix == "/" {
         path
-    } else if path == prefix || path == format!("{prefix}/") {
+    } else if path == prefix
+        || (path.len() == prefix.len() + 1 && path.starts_with(prefix) && path.ends_with('/'))
+    {
         "/"
     } else {
         path.strip_prefix(prefix)

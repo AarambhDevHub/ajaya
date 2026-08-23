@@ -181,7 +181,7 @@ pub enum Message {
     Text(String),
     /// A binary message.
     Binary(Vec<u8>),
-    /// A ping frame (server should auto-pong — see [`WebSocket::recv`]).
+    /// A ping frame (server should auto-pong — see `WebSocket::recv`).
     Ping(Vec<u8>),
     /// A pong frame (response to ping).
     Pong(Vec<u8>),

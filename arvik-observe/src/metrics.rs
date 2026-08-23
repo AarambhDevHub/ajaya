@@ -377,9 +377,19 @@ pub async fn metrics_handler() -> Response {
 
 /// Prometheus scrape handler for a specific registry.
 pub async fn metrics_handler_with_registry(registry: MetricsRegistry) -> Response {
+    // gather() locks every collector and deep-clones metric families, then
+    // the encoder walks them — CPU-bound work that must not run inline on
+    // the tokio worker handling the scrape.
+    let encoded = tokio::task::spawn_blocking(move || registry.encode_text())
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!("metrics encode task failed: {}", err);
+            String::new()
+        });
+
     ResponseBuilder::new()
         .header(http::header::CONTENT_TYPE, MetricsRegistry::content_type())
-        .body(registry.encode_text())
+        .body(encoded)
 }
 
 type BodyCallback = dyn Fn(u64) + Send + Sync + 'static;

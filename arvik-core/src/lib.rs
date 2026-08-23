@@ -17,7 +17,9 @@
 //! - [`Html`] — HTML response type
 //! - [`Error`] — Framework error type
 
+pub mod accept;
 pub mod body;
+pub mod body_limit;
 pub mod error;
 pub mod extract;
 pub mod handler;
@@ -31,6 +33,7 @@ pub mod stream_body;
 
 // Re-exports
 pub use body::Body;
+pub use body_limit::{DEFAULT_BODY_LIMIT, DefaultBodyLimit};
 pub use error::{Error, ErrorResponse};
 pub use extract::{FromRequest, FromRequestParts};
 pub use handler::Handler;

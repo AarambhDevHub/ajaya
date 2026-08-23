@@ -36,8 +36,15 @@ impl std::fmt::Display for PathRejection {
 
 impl IntoResponse for PathRejection {
     fn into_response(self) -> Response {
+        // MissingPathParams means routing did not attach params — a server-side
+        // wiring mistake (fallback handler / middleware outside routing), not a
+        // client error.
+        let status = match &self {
+            Self::MissingPathParams => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::DeserializationFailed(_) => StatusCode::BAD_REQUEST,
+        };
         ResponseBuilder::new()
-            .status(StatusCode::BAD_REQUEST)
+            .status(status)
             .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
             .body(arvik_core::Body::from(self.to_string()))
     }
@@ -87,6 +94,9 @@ pub enum JsonRejection {
     MissingJsonContentType,
     /// JSON deserialization failed.
     DeserializationFailed(String),
+    /// Request body exceeded the configured size limit
+    /// ([`DefaultBodyLimit`](arvik_core::body_limit::DefaultBodyLimit), 2 MiB by default).
+    PayloadTooLarge,
 }
 
 impl std::fmt::Display for JsonRejection {
@@ -97,6 +107,9 @@ impl std::fmt::Display for JsonRejection {
                 write!(f, "Expected Content-Type: application/json")
             }
             Self::DeserializationFailed(msg) => write!(f, "Invalid JSON: {msg}"),
+            Self::PayloadTooLarge => {
+                write!(f, "Request payload exceeds the maximum allowed size")
+            }
         }
     }
 }
@@ -105,6 +118,7 @@ impl IntoResponse for JsonRejection {
     fn into_response(self) -> Response {
         let status = match &self {
             JsonRejection::MissingJsonContentType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            JsonRejection::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             _ => StatusCode::BAD_REQUEST,
         };
         ResponseBuilder::new()
@@ -127,6 +141,9 @@ pub enum FormRejection {
     InvalidContentType,
     /// Form deserialization failed.
     DeserializationFailed(String),
+    /// Request body exceeded the configured size limit
+    /// ([`DefaultBodyLimit`](arvik_core::body_limit::DefaultBodyLimit), 2 MiB by default).
+    PayloadTooLarge,
 }
 
 impl std::fmt::Display for FormRejection {
@@ -140,6 +157,9 @@ impl std::fmt::Display for FormRejection {
                 )
             }
             Self::DeserializationFailed(msg) => write!(f, "Invalid form data: {msg}"),
+            Self::PayloadTooLarge => {
+                write!(f, "Request payload exceeds the maximum allowed size")
+            }
         }
     }
 }
@@ -148,6 +168,7 @@ impl IntoResponse for FormRejection {
     fn into_response(self) -> Response {
         let status = match &self {
             FormRejection::InvalidContentType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            FormRejection::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             _ => StatusCode::BAD_REQUEST,
         };
         ResponseBuilder::new()

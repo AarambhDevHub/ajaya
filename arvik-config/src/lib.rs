@@ -248,6 +248,28 @@ impl ArvikConfig {
             self.http2.initial_connection_window_size,
             "http2.initial_connection_window_size",
         )?;
+        // h2 asserts `size <= (1 << 31) - 1` when the connection is built;
+        // reject oversized values here with a clear message instead of
+        // panicking at runtime on the first HTTP/2 request.
+        const H2_MAX_WINDOW: u64 = (1 << 31) - 1;
+        for (field, value) in [
+            (
+                "http2.initial_stream_window_size",
+                self.http2.initial_stream_window_size,
+            ),
+            (
+                "http2.initial_connection_window_size",
+                self.http2.initial_connection_window_size,
+            ),
+        ] {
+            if let Some(size) = value
+                && size as u64 > H2_MAX_WINDOW
+            {
+                return Err(ConfigError::Validation(format!(
+                    "{field} must be at most {H2_MAX_WINDOW} (h2 protocol maximum), got {size}"
+                )));
+            }
+        }
         validate_nonzero(
             self.http2.max_concurrent_streams,
             "http2.max_concurrent_streams",
@@ -418,7 +440,7 @@ impl Default for Http2Section {
 }
 
 /// Optional TLS file settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct TlsSection {
     /// TLS backend.
@@ -431,6 +453,23 @@ pub struct TlsSection {
     pub pkcs12_path: Option<PathBuf>,
     /// PKCS#12 identity password for native-tls.
     pub pkcs12_password: Option<String>,
+}
+
+impl std::fmt::Debug for TlsSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never render the keystore password: any `{:?}` of the config would
+        // otherwise leak it to logs and crash dumps.
+        f.debug_struct("TlsSection")
+            .field("backend", &self.backend)
+            .field("cert_path", &self.cert_path)
+            .field("key_path", &self.key_path)
+            .field("pkcs12_path", &self.pkcs12_path)
+            .field(
+                "pkcs12_password",
+                &self.pkcs12_password.as_ref().map(|_| "***REDACTED***"),
+            )
+            .finish()
+    }
 }
 
 impl Default for TlsSection {
@@ -599,16 +638,39 @@ fn merge_values(base: &mut Value, overlay: Value) {
 
 fn apply_env(root: &mut Value, prefix: &str) -> Result<()> {
     let prefix = format!("{}_", prefix.trim_end_matches('_'));
-    for (var, value) in std::env::vars() {
+    let mut unknown: Vec<String> = Vec::new();
+    for (raw_var, raw_value) in std::env::vars_os() {
+        // Skip non-UTF-8 entries instead of panicking on unrelated variables
+        // somewhere in the process environment.
+        let (Ok(var), Ok(value)) = (raw_var.into_string(), raw_value.into_string()) else {
+            continue;
+        };
         if !var.starts_with(&prefix) {
             continue;
         }
 
         let suffix = &var[prefix.len()..];
-        let Some((path, value)) = parse_env_override(suffix, &var, &value)? else {
-            continue;
-        };
-        set_path(root, path, value);
+        match parse_env_override(suffix, &var, &value)? {
+            Some((path, value)) => set_path(root, path, value),
+            None if suffix_starts_with_known_section(suffix) => {
+                // A typo inside a known section must not silently fall back to
+                // file/default values — the same mistake in a TOML file fails
+                // loudly.
+                unknown.push(var);
+            }
+            // Variables outside the config schema (other tooling sharing the
+            // prefix) are ignored, as they always were.
+            None => {}
+        }
+    }
+
+    if !unknown.is_empty() {
+        return Err(ConfigError::Validation(format!(
+            "unknown configuration environment variable(s): {}. Expected names              prefixed with `{}` (e.g. {}SERVER_PORT); check for typos.",
+            unknown.join(", "),
+            prefix,
+            prefix
+        )));
     }
 
     Ok(())
@@ -709,6 +771,17 @@ fn parse_env_override(
     Ok(parsed)
 }
 
+/// True when the variable's first path segment names a config section, so an
+/// unmatched remainder is almost certainly a typo (e.g. `SERVER_MAXCONNECTIONS`
+/// instead of `SERVER_MAX_CONNECTIONS`) rather than another tool's variable.
+fn suffix_starts_with_known_section(suffix: &str) -> bool {
+    let section = suffix.split('_').next().unwrap_or_default();
+    matches!(
+        section.to_ascii_lowercase().as_str(),
+        "server" | "http1" | "http2" | "shutdown" | "tls"
+    )
+}
+
 fn parse_bool(var: &str, value: &str) -> Result<bool> {
     match value.to_ascii_lowercase().as_str() {
         "true" | "1" | "yes" | "on" => Ok(true),
@@ -779,10 +852,21 @@ impl ConfigWatcher {
         })
         .map_err(|err| ConfigError::Watch(err.to_string()))?;
 
+        // Watch the parent *directories*, not the files themselves: editors
+        // and deploy tooling replace configs via temp-file+rename, which
+        // silently orphans an inode watch. Reloads read by path, so they pick
+        // up the replacement on the next event regardless.
+        let mut watched_dirs = std::collections::HashSet::new();
         for file in &builder.files {
-            watcher
-                .watch(file, notify::RecursiveMode::NonRecursive)
-                .map_err(|err| ConfigError::Watch(err.to_string()))?;
+            let dir = match file.parent() {
+                Some(dir) => dir.to_path_buf(),
+                None => continue,
+            };
+            if watched_dirs.insert(dir.clone()) {
+                watcher
+                    .watch(&dir, notify::RecursiveMode::NonRecursive)
+                    .map_err(|err| ConfigError::Watch(err.to_string()))?;
+            }
         }
 
         let current_task = std::sync::Arc::clone(&current);
@@ -794,7 +878,13 @@ impl ConfigWatcher {
                 }
 
                 tokio::time::sleep(Duration::from_millis(200)).await;
-                while event_rx.try_recv().is_ok() {}
+                // Coalesce bursts of events, but forward any watcher errors
+                // that arrived during the debounce window instead of dropping.
+                while let Ok(pending) = event_rx.try_recv() {
+                    if let Err(err) = pending {
+                        let _ = update_tx.send(Err(ConfigError::Watch(err.to_string())));
+                    }
+                }
 
                 match builder.build_inner() {
                     Ok(config) => {
@@ -935,6 +1025,60 @@ mod tests {
         }
 
         assert_eq!(config.server.port, 9090);
+    }
+
+    #[test]
+    fn typo_in_known_section_fails_loudly() {
+        let prefix = unique_prefix();
+        let key = format!("{prefix}_SERVER_MAXCONNECTIONS");
+
+        unsafe {
+            std::env::set_var(&key, "50");
+        }
+        let result = ArvikConfig::builder().env_prefix(&prefix).build();
+        unsafe {
+            std::env::remove_var(&key);
+        }
+
+        let err = result.expect_err("typo'd env var in a known section must fail");
+        let text = err.to_string();
+        assert!(text.contains("SERVER_MAXCONNECTIONS"), "got: {text}");
+    }
+
+    #[test]
+    fn foreign_vars_in_prefix_namespace_are_ignored() {
+        // Another tool sharing the prefix must not break config loading.
+        let prefix = unique_prefix();
+        let key = format!("{prefix}_FOREIGN_TOOL_FLAG");
+
+        unsafe {
+            std::env::set_var(&key, "1");
+        }
+        let result = ArvikConfig::builder().env_prefix(&prefix).build();
+        unsafe {
+            std::env::remove_var(&key);
+        }
+
+        result.unwrap();
+    }
+
+    #[test]
+    fn h2_window_above_protocol_maximum_is_rejected() {
+        let config = ArvikConfig {
+            http2: Http2Section {
+                initial_stream_window_size: Some((1 << 31) as u32), // h2 max is (1<<31)-1
+                ..Http2Section::default()
+            },
+            ..ArvikConfig::default()
+        };
+
+        let err = config
+            .validate()
+            .expect_err("oversized window must fail validation");
+        assert!(
+            err.to_string().contains("initial_stream_window_size"),
+            "got: {err}"
+        );
     }
 
     #[test]

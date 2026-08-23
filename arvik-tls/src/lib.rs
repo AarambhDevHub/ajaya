@@ -156,6 +156,19 @@ pub mod rustls {
             Arc::clone(&self.inner.read())
         }
 
+        /// Restrict ALPN advertisement to HTTP/2 only.
+        ///
+        /// Use when the server is configured with `http2_only(true)`: otherwise
+        /// the default offer invites clients to negotiate `http/1.1` while the
+        /// server answers with HTTP/2 frames, which compliant clients reject.
+        pub fn with_alpn_http2_only(self) -> Self {
+            let current = self.inner.read().clone();
+            let mut updated = (*current).clone();
+            updated.alpn_protocols = vec![ALPN_HTTP2.to_vec()];
+            *self.inner.write() = Arc::new(updated);
+            self
+        }
+
         /// Return a TLS acceptor using the currently active config.
         pub fn acceptor(&self) -> TlsAcceptor {
             TlsAcceptor::from(self.current_config())
@@ -257,26 +270,69 @@ pub mod rustls {
             key_path: std::path::PathBuf,
             debounce: Duration,
         ) -> Result<Self> {
-            use notify::{RecursiveMode, Watcher as _};
+            use notify::{EventKind, RecursiveMode, Watcher as _};
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+
+            // Watch the *parent directories*, not the file inodes: deploys
+            // replace certificates with temp-file+rename and certbot re-points
+            // `live/<domain>` symlinks — an inode watch goes silent after both.
+            let cert_dir = cert_path.parent().map(Path::to_path_buf);
+            let key_dir = key_path.parent().map(Path::to_path_buf);
+            let cert_name = cert_path.file_name().map(std::ffi::OsStr::to_owned);
+            let key_name = key_path.file_name().map(std::ffi::OsStr::to_owned);
+
+            let notify_cert_path = cert_path.clone();
+            let notify_key_path = key_path.clone();
+            let notify_cert_dir = cert_dir.clone();
+            let notify_key_dir = key_dir.clone();
             let mut watcher = notify::recommended_watcher(
                 move |event: notify::Result<notify::Event>| match event {
-                    Ok(_) => {
-                        let _ = tx.send(());
+                    Ok(event) => {
+                        // Only content-relevant changes should trigger a
+                        // reload; access/metadata churn would otherwise cause
+                        // constant re-parsing.
+                        if !matches!(
+                            event.kind,
+                            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                        ) {
+                            return;
+                        }
+                        // The watched directories see every sibling file too —
+                        // react only to our own file names, or to a
+                        // bare-directory event (how some backends report renames).
+                        let relevant = event.paths.iter().any(|p| {
+                            p == &notify_cert_path
+                                || p == &notify_key_path
+                                || p.file_name().is_some_and(|name| {
+                                    Some(name) == cert_name.as_deref()
+                                        || Some(name) == key_name.as_deref()
+                                })
+                                || Some(p.as_path()) == notify_cert_dir.as_deref()
+                                || Some(p.as_path()) == notify_key_dir.as_deref()
+                        });
+                        if relevant {
+                            let _ = tx.send(());
+                        }
                     }
                     Err(err) => tracing::warn!("TLS certificate watch error: {}", err),
                 },
             )?;
 
-            watcher.watch(&cert_path, RecursiveMode::NonRecursive)?;
-            watcher.watch(&key_path, RecursiveMode::NonRecursive)?;
+            let mut seen_dirs = std::collections::HashSet::new();
+            for dir in [&cert_dir, &key_dir].into_iter().flatten() {
+                if seen_dirs.insert(dir.clone()) {
+                    watcher.watch(dir, RecursiveMode::NonRecursive)?;
+                }
+            }
 
             let task = tokio::spawn(async move {
                 while rx.recv().await.is_some() {
                     tokio::time::sleep(debounce).await;
                     while rx.try_recv().is_ok() {}
 
+                    // Path-based reload resolves symlinks and replacements
+                    // freshly on every attempt, so post-rename events land.
                     if let Err(err) = config.reload_from_pem_file(&cert_path, &key_path).await {
                         tracing::warn!(
                             "TLS certificate reload failed; keeping previous config active: {}",
@@ -355,6 +411,8 @@ pub mod native {
         pub fn from_pkcs12(data: impl AsRef<[u8]>, password: &str) -> Result<Self> {
             let identity = native_tls::Identity::from_pkcs12(data.as_ref(), password)?;
             let mut builder = native_tls::TlsAcceptor::builder(identity);
+            // native-tls 0.2.18: accept_alpn is infallible (returns the
+            // builder), so ALPN setup cannot silently fail on this version.
             builder.accept_alpn(&["h2", "http/1.1"]);
             let acceptor = builder.build()?;
             Ok(Self {

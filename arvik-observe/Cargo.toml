@@ -37,7 +37,7 @@ uuid = { workspace = true, optional = true }
 
 [features]
 default = []
-metrics = ["dep:once_cell", "dep:prometheus"]
+metrics = ["dep:once_cell", "dep:prometheus", "dep:tokio"]
 opentelemetry = [
     "dep:opentelemetry",
     "dep:opentelemetry-otlp",

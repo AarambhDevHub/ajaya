@@ -26,6 +26,7 @@
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use arvik_core::{Request, Response};
@@ -416,9 +417,34 @@ impl<S> Layer<S> for SecurityHeadersLayer {
     type Service = SecurityHeadersService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
+        // Every value is constant for the layer's lifetime — build the
+        // HeaderValues once here instead of cloning the whole config and
+        // re-formatting the HSTS string on every request.
+        let mut headers: Vec<(HeaderName, HeaderValue)> = Vec::with_capacity(7);
+        let mut add = |name: &'static str, value: &str| {
+            if let Ok(value) = HeaderValue::from_str(value) {
+                headers.push((HeaderName::from_static(name), value));
+            }
+        };
+        add("x-frame-options", self.frame_options);
+        add("x-content-type-options", "nosniff");
+        add("x-xss-protection", "1; mode=block");
+        add(
+            "strict-transport-security",
+            &format!("max-age={}; includeSubDomains", self.hsts_max_age),
+        );
+        add("referrer-policy", "strict-origin-when-cross-origin");
+        add(
+            "permissions-policy",
+            "geolocation=(), microphone=(), camera=(), payment=()",
+        );
+        if let Some(csp) = &self.csp {
+            add("content-security-policy", csp);
+        }
+
         SecurityHeadersService {
             inner,
-            config: self.clone(),
+            headers: headers.into(),
         }
     }
 }
@@ -427,7 +453,7 @@ impl<S> Layer<S> for SecurityHeadersLayer {
 #[derive(Clone)]
 pub struct SecurityHeadersService<S> {
     inner: S,
-    config: SecurityHeadersLayer,
+    headers: Arc<[(HeaderName, HeaderValue)]>,
 }
 
 impl<S> Service<Request> for SecurityHeadersService<S>
@@ -446,41 +472,16 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
-        let config = self.config.clone();
+        let headers = Arc::clone(&self.headers);
 
         Box::pin(async move {
             let mut response = inner.call(req).await?;
             let h = response.headers_mut();
-
-            set_header(h, "x-frame-options", config.frame_options);
-            set_header(h, "x-content-type-options", "nosniff");
-            set_header(h, "x-xss-protection", "1; mode=block");
-            set_header(
-                h,
-                "strict-transport-security",
-                &format!("max-age={}; includeSubDomains", config.hsts_max_age),
-            );
-            set_header(h, "referrer-policy", "strict-origin-when-cross-origin");
-            set_header(
-                h,
-                "permissions-policy",
-                "geolocation=(), microphone=(), camera=(), payment=()",
-            );
-
-            if let Some(csp) = &config.csp {
-                set_header(h, "content-security-policy", csp);
+            // or_insert preserves handler-set headers, as before.
+            for (name, value) in headers.iter() {
+                h.entry(name.clone()).or_insert_with(|| value.clone());
             }
-
             Ok(response)
         })
-    }
-}
-
-fn set_header(headers: &mut http::HeaderMap, name: &str, value: &str) {
-    if let (Ok(n), Ok(v)) = (
-        HeaderName::from_bytes(name.as_bytes()),
-        HeaderValue::from_str(value),
-    ) {
-        headers.entry(n).or_insert(v);
     }
 }

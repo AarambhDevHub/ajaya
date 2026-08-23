@@ -87,6 +87,10 @@ pub use arvik_core::ResponseParts; // 0.3.2
 pub use arvik_core::FromRequest;
 pub use arvik_core::FromRequestParts;
 
+// Body size limiting (0.9.6)
+pub use arvik_core::body_limit::DEFAULT_BODY_LIMIT;
+pub use arvik_core::body_limit::DefaultBodyLimit;
+
 // ---------------------------------------------------------------------------
 // Router types
 // ---------------------------------------------------------------------------
@@ -303,14 +307,14 @@ pub use arvik_static::{ServeDir, ServeFile};
 ///
 /// | Function | Use case |
 /// |---|---|
-/// | [`from_fn`] | Middleware with extractors, no shared state |
-/// | [`from_fn_with_state`] | Middleware with extractors + shared app state |
-/// | [`map_request`] | Transform the incoming request only |
-/// | [`map_request_with_state`] | Transform request with state access |
-/// | [`map_response`] | Transform the outgoing response only |
-/// | [`map_response_with_state`] | Transform response with state access |
+/// | `from_fn` | Middleware with extractors, no shared state |
+/// | `from_fn_with_state` | Middleware with extractors + shared app state |
+/// | `map_request` | Transform the incoming request only |
+/// | `map_request_with_state` | Transform request with state access |
+/// | `map_response` | Transform the outgoing response only |
+/// | `map_response_with_state` | Transform response with state access |
 ///
-/// See [`arvik_middleware::from_fn`] for detailed documentation and examples.
+/// See [`arvik_middleware::from_fn()`] for detailed documentation and examples.
 pub mod middleware {
     pub use arvik_middleware::{
         auth::RequireAuthorizationLayer,
@@ -345,7 +349,7 @@ pub mod middleware {
 // Add at the top-level of lib.rs (outside the middleware module):
 pub use arvik_middleware::CorsLayer;
 pub use arvik_middleware::auth::RequireAuthorizationLayer;
-pub use arvik_middleware::body_limit::RequestBodyLimitLayer;
+pub use arvik_middleware::body_limit::{DefaultBodyLimitLayer, RequestBodyLimitLayer};
 pub use arvik_middleware::catch_panic::CatchPanicLayer;
 pub use arvik_middleware::compression::{CompressionLayer, CompressionLevel, DecompressionLayer};
 pub use arvik_middleware::csrf::{CsrfLayer, CsrfToken};

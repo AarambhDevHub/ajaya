@@ -30,6 +30,9 @@ use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn, onesho
 
 // ── MethodRouter ────────────────────────────────────────────────────────────
 
+/// Shared, type-erased handler list.
+type HandlerList<S> = std::sync::Arc<Vec<(MethodFilter, Box<dyn ErasedHandler<S>>)>>;
+
 /// Stores one handler per HTTP method for a single route.
 ///
 /// Created via the top-level constructor functions [`get`], [`post`], etc.
@@ -42,19 +45,42 @@ use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn, onesho
 ///     .layer(RequireAuthLayer::new());
 /// ```
 pub struct MethodRouter<S = ()> {
-    /// (method_filter, type-erased handler) pairs.
-    handlers: Vec<(MethodFilter, Box<dyn ErasedHandler<S>>)>,
+    /// (method_filter, type-erased handler) pairs, shared behind an Arc so
+    /// cloning a router for per-request dispatch is an O(1) refcount bump
+    /// instead of deep-cloning every boxed handler.
+    handlers: HandlerList<S>,
     /// Bitmask of all registered methods — used to build the `Allow` header.
     allow_methods: MethodFilter,
     /// Tower layers applied to each matched handler (innermost = first in vec).
     layers: Vec<LayerFn>,
 }
 
+/// Mutable access to a handler list that may be shared behind an Arc.
+///
+/// During router construction the Arc is almost always unique, so this is a
+/// no-op there; sharing only appears once built routers get cloned.
+fn handlers_mut<S>(
+    handlers: &mut HandlerList<S>,
+) -> &mut Vec<(MethodFilter, Box<dyn ErasedHandler<S>>)>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    if std::sync::Arc::get_mut(handlers).is_none() {
+        *handlers = std::sync::Arc::new(
+            handlers
+                .iter()
+                .map(|(filter, handler)| (*filter, handler.clone_box()))
+                .collect(),
+        );
+    }
+    std::sync::Arc::get_mut(handlers).expect("just made unique")
+}
+
 impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// Create an empty `MethodRouter` with no handlers.
     pub fn new() -> Self {
         Self {
-            handlers: Vec::new(),
+            handlers: std::sync::Arc::new(Vec::new()),
             allow_methods: MethodFilter::NONE,
             layers: Vec::new(),
         }
@@ -67,7 +93,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         T: 'static,
     {
         self.allow_methods |= filter;
-        self.handlers.push((filter, into_erased(handler)));
+        handlers_mut(&mut self.handlers).push((filter, into_erased(handler)));
         self
     }
 
@@ -81,7 +107,8 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         }
 
         self.allow_methods |= other.allow_methods;
-        self.handlers.extend(other.handlers);
+        handlers_mut(&mut self.handlers)
+            .extend(other.handlers.iter().map(|(f, h)| (*f, h.clone_box())));
         self.layers.extend(other.layers);
         self
     }
@@ -173,8 +200,11 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.layers.push(into_layer_fn(layer));
@@ -184,14 +214,27 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// Dispatch the request to the matching method handler, applying any
     /// configured layers.
     ///
+    /// HEAD requests are served by the GET handler when no dedicated HEAD
+    /// handler is registered (RFC 9110 §9.3.2 — hyper strips the response
+    /// body for HEAD).
+    ///
     /// Returns `405 Method Not Allowed` (with an `Allow` header) if no handler
-    /// matches the request method.
+    /// matches the request method — including non-standard extension methods
+    /// (e.g. `PURGE`) unless the route registered [`MethodFilter::EXTENSION`]
+    /// or [`MethodFilter::ANY`].
     pub async fn call(&self, req: Request, state: S) -> Response {
         let method = req.method().clone();
         let method_filter = MethodFilter::from_method(&method);
 
-        for (filter, handler) in &self.handlers {
-            if filter.contains(method_filter) {
+        // RFC 9110 §9.3.2: a HEAD response is a GET response without a body,
+        // so fall back to the GET handler unless HEAD was explicitly bound.
+        let head_falls_back_to_get =
+            method == http::Method::HEAD && !self.allow_methods.contains(MethodFilter::HEAD);
+
+        for (filter, handler) in self.handlers.iter() {
+            let matched = filter.contains(method_filter)
+                || (head_falls_back_to_get && filter.contains(MethodFilter::GET));
+            if matched {
                 if self.layers.is_empty() {
                     // ── Fast path: no per-route layers ──────────────────────
                     let h = handler.clone_box();
@@ -219,10 +262,20 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
             .text("Method Not Allowed")
     }
 
+    /// Append already-erased layers to this router's per-route stack.
+    ///
+    /// Used by [`crate::Router::nest`] / [`crate::Router::merge`] to preserve
+    /// middleware attached inside a sub-router when its routes are flattened
+    /// into the parent: appended layers wrap the ones registered earlier,
+    /// matching the router-level (`layer` outside `route_layer`) ordering.
+    pub(crate) fn extend_layers(&mut self, extra: impl IntoIterator<Item = LayerFn>) {
+        self.layers.extend(extra);
+    }
+
     /// Bind application state, converting `MethodRouter<S>` → `MethodRouter<()>`.
     ///
     /// After calling this, the method router is ready to be served directly
-    /// or attached to a [`Router`] that is itself bound with [`Router::with_state`].
+    /// or attached to a `Router` that is itself bound with `Router::with_state`.
     ///
     /// # Example
     ///
@@ -235,17 +288,18 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// ```
     pub fn with_state(self, state: S) -> MethodRouter<()> {
         let state = Arc::new(state);
-        let handlers = self
-            .handlers
-            .into_iter()
-            .map(|(filter, handler)| {
-                let bound: Box<dyn ErasedHandler<()>> = Box::new(StateBound {
-                    inner: handler,
-                    state: Arc::clone(&state),
-                });
-                (filter, bound)
-            })
-            .collect();
+        let handlers = std::sync::Arc::new(
+            self.handlers
+                .iter()
+                .map(|(filter, handler)| {
+                    let bound: Box<dyn ErasedHandler<()>> = Box::new(StateBound {
+                        inner: handler.clone_box(),
+                        state: Arc::clone(&state),
+                    });
+                    (*filter, bound)
+                })
+                .collect(),
+        );
 
         MethodRouter {
             handlers,
@@ -257,14 +311,11 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
 
 impl<S: Clone + Send + Sync + 'static> Clone for MethodRouter<S> {
     fn clone(&self) -> Self {
+        // handlers live behind an Arc: no per-handler clone_box here.
         Self {
-            handlers: self
-                .handlers
-                .iter()
-                .map(|(f, h)| (*f, h.clone_box()))
-                .collect(),
+            handlers: std::sync::Arc::clone(&self.handlers),
             allow_methods: self.allow_methods,
-            layers: self.layers.clone(), // Arc — O(n) cheap clone
+            layers: self.layers.clone(), // LayerFn is Arc-backed — O(n) cheap
         }
     }
 }
@@ -435,4 +486,80 @@ fn build_allow_header(filter: MethodFilter) -> String {
         .map(|(_, m)| *m)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arvik_core::Body;
+
+    async fn get_handler() -> &'static str {
+        "get-body"
+    }
+
+    async fn delete_handler() -> &'static str {
+        "deleted"
+    }
+
+    async fn head_handler() -> &'static str {
+        "head-body"
+    }
+
+    async fn any_handler() -> &'static str {
+        "any-body"
+    }
+
+    fn request(method: &str) -> Request {
+        Request::new(
+            http::Request::builder()
+                .method(method)
+                .uri("/")
+                .body(Body::empty())
+                .unwrap(),
+        )
+    }
+
+    async fn body_string(res: Response) -> String {
+        res.into_body().to_string().await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn unknown_method_returns_405_not_the_registered_handler() {
+        let router = MethodRouter::new().delete(delete_handler);
+        let res = router.call(request("PURGE"), ()).await;
+        assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+        assert_eq!(res.headers().get(http::header::ALLOW).unwrap(), "DELETE");
+        assert_eq!(body_string(res).await, "Method Not Allowed");
+    }
+
+    #[tokio::test]
+    async fn known_method_mismatch_still_returns_405() {
+        let router = MethodRouter::new().delete(delete_handler);
+        let res = router.call(request("POST"), ()).await;
+        assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    #[tokio::test]
+    async fn any_route_still_matches_extension_methods() {
+        let router = MethodRouter::new().on(MethodFilter::ANY, any_handler);
+        let res = router.call(request("PURGE"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_string(res).await, "any-body");
+    }
+
+    #[tokio::test]
+    async fn head_falls_back_to_get_handler() {
+        let router = MethodRouter::new().get(get_handler);
+        let res = router.call(request("HEAD"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_string(res).await, "get-body");
+    }
+
+    #[tokio::test]
+    async fn dedicated_head_handler_takes_precedence_over_get() {
+        let router = MethodRouter::new().get(get_handler).head(head_handler);
+        let res = router.call(request("HEAD"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(body_string(res).await, "head-body");
+    }
 }

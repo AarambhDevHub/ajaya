@@ -55,12 +55,13 @@ where
             return Err(JsonRejection::MissingJsonContentType);
         }
 
-        // Read body
-        let body_bytes = req
-            .into_body()
-            .to_bytes()
-            .await
-            .map_err(|e| JsonRejection::BodyReadFailed(e.to_string()))?;
+        // Read body under the configured size limit (2 MiB by default)
+        let limit = arvik_core::body_limit::resolve_limit(req.extensions());
+        let body_bytes = match req.into_body().to_bytes_limited(limit).await {
+            Ok(bytes) => bytes,
+            Err(e) if e.is_payload_too_large() => return Err(JsonRejection::PayloadTooLarge),
+            Err(e) => return Err(JsonRejection::BodyReadFailed(e.to_string())),
+        };
 
         // Deserialize
         let value = serde_json::from_slice(&body_bytes)
@@ -109,4 +110,51 @@ fn json_content_type(headers: &http::HeaderMap) -> bool {
     mime.type_() == mime::APPLICATION
         && (mime.subtype() == mime::JSON
             || mime.suffix().is_some_and(|suffix| suffix == mime::JSON))
+}
+
+#[cfg(test)]
+mod body_limit_tests {
+    use super::*;
+    use arvik_core::Body;
+    use arvik_core::body_limit::{DEFAULT_BODY_LIMIT, DefaultBodyLimit};
+
+    fn json_request(body: Body) -> Request {
+        Request::new(
+            http::Request::builder()
+                .method(http::Method::POST)
+                .uri("/")
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .body(body)
+                .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn oversized_json_is_rejected_with_413() {
+        let big = format!("[{}]", "0,".repeat(DEFAULT_BODY_LIMIT / 2));
+        let req = json_request(Body::from_bytes(big.into_bytes().into()));
+        match Json::<serde_json::Value>::from_request(req, &()).await {
+            Err(JsonRejection::PayloadTooLarge) => {}
+            other => panic!("expected PayloadTooLarge, got {:?}", other.err()),
+        }
+    }
+
+    #[tokio::test]
+    async fn json_within_limit_extracts() {
+        let req = json_request(Body::from_bytes(br#"{"ok":true}"#.to_vec().into()));
+        let Json(value) = Json::<serde_json::Value>::from_request(req, &())
+            .await
+            .unwrap();
+        assert_eq!(value["ok"], serde_json::Value::Bool(true));
+    }
+
+    #[tokio::test]
+    async fn default_body_limit_extension_raises_json_limit() {
+        let mut req = json_request(Body::from_bytes(br#"{"ok":1}"#.to_vec().into()));
+        req.extensions_mut().insert(DefaultBodyLimit::max(4));
+        match Json::<serde_json::Value>::from_request(req, &()).await {
+            Err(JsonRejection::PayloadTooLarge) => {}
+            other => panic!("expected PayloadTooLarge, got {:?}", other.err()),
+        }
+    }
 }

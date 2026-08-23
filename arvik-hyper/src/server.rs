@@ -9,6 +9,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use arvik_core::Body;
 use arvik_core::handler::Handler;
@@ -20,7 +21,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use socket2::{Domain, Protocol, Socket, TcpKeepalive, Type};
 use tokio::net::{TcpListener, TcpStream, lookup_host};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinSet;
 use tower_service::Service as _;
 
@@ -310,6 +311,7 @@ impl Server {
         let mut accept_workers = spawn_accept_workers(self.listeners);
         let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
+        let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(());
 
         loop {
             tokio::select! {
@@ -317,6 +319,9 @@ impl Server {
 
                 _ = &mut signal => {
                     tracing::info!("Shutdown signal received; stopping listener on {}", self.addr);
+                    // Tell every established connection to finish its current
+                    // request and close instead of serving new ones.
+                    let _ = conn_shutdown_tx.send(());
                     break;
                 }
                 joined = connections.join_next(), if !connections.is_empty() => {
@@ -326,11 +331,19 @@ impl Server {
                     let Some(next) = next else {
                         break;
                     };
-                    let (stream, peer_addr) = next?;
-                    apply_stream_options(&stream, &self.config)?;
+                    let Some((stream, peer_addr)) = handle_accept_result(next, self.addr).await? else {
+                        continue;
+                    };
+                    if let Err(err) = apply_stream_options(&stream, &self.config) {
+                        tracing::warn!(peer = %peer_addr, error = %err,
+                            "dropping connection: failed to apply TCP options");
+                        continue;
+                    }
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
-                        drop(stream);
+                        // Best-effort 503 so clients and load balancers see an
+                        // HTTP signal instead of a bare connection reset.
+                        reject_over_capacity(stream).await;
                         continue;
                     }
 
@@ -343,9 +356,10 @@ impl Server {
                     tracing::debug!("Accepted connection from {}", peer_addr);
                     shutdown_config.call_connected(info);
 
+                    let shutdown_rx = conn_shutdown_rx.clone();
                     connections.spawn(async move {
                         let _guard = ConnectionGuard::new(active, shutdown_config, info);
-                        run_connection(io, service, config, peer_addr).await;
+                        run_connection(io, service, config, peer_addr, shutdown_rx).await;
                     });
                 }
             }
@@ -375,6 +389,8 @@ impl Server {
         let mut accept_workers = spawn_accept_workers(self.listeners);
         let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
+        let handshake_timeout = self.config.handshake_timeout_value();
+        let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(());
 
         loop {
             tokio::select! {
@@ -382,6 +398,9 @@ impl Server {
 
                 _ = &mut signal => {
                     tracing::info!("Shutdown signal received; stopping TLS listener on {}", self.addr);
+                    // Tell every established connection to finish its current
+                    // request and close instead of serving new ones.
+                    let _ = conn_shutdown_tx.send(());
                     break;
                 }
                 joined = connections.join_next(), if !connections.is_empty() => {
@@ -391,11 +410,19 @@ impl Server {
                     let Some(next) = next else {
                         break;
                     };
-                    let (stream, peer_addr) = next?;
-                    apply_stream_options(&stream, &self.config)?;
+                    let Some((stream, peer_addr)) = handle_accept_result(next, self.addr).await? else {
+                        continue;
+                    };
+                    if let Err(err) = apply_stream_options(&stream, &self.config) {
+                        tracing::warn!(peer = %peer_addr, error = %err,
+                            "dropping connection: failed to apply TCP options");
+                        continue;
+                    }
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
-                        drop(stream);
+                        // Best-effort 503 so clients and load balancers see an
+                        // HTTP signal instead of a bare connection reset.
+                        reject_over_capacity(stream).await;
                         continue;
                     }
 
@@ -408,13 +435,28 @@ impl Server {
                     tracing::debug!("Accepted TLS connection from {}", peer_addr);
                     shutdown_config.call_connected(info);
 
+                    let shutdown_rx = conn_shutdown_rx.clone();
                     connections.spawn(async move {
                         let _guard = ConnectionGuard::new(active, shutdown_config, info);
-                        match tls_config.accept(stream).await {
-                            Ok(tls_stream) => {
-                                run_connection(TokioIo::new(tls_stream), service, config, peer_addr).await;
+                        let handshake = async {
+                            match tls_config.accept(stream).await {
+                                Ok(tls_stream) => {
+                                    run_connection(TokioIo::new(tls_stream), service, config, peer_addr, shutdown_rx).await;
+                                }
+                                Err(err) => tracing::warn!("TLS handshake failed from {}: {}", peer_addr, err),
                             }
-                            Err(err) => tracing::warn!("TLS handshake failed from {}: {}", peer_addr, err),
+                        };
+                        match handshake_timeout {
+                            Some(limit) => {
+                                if tokio::time::timeout(limit, handshake).await.is_err() {
+                                    tracing::warn!(
+                                        peer = %peer_addr,
+                                        timeout = ?limit,
+                                        "TLS handshake timed out; dropping connection"
+                                    );
+                                }
+                            }
+                            None => handshake.await,
                         }
                     });
                 }
@@ -445,6 +487,8 @@ impl Server {
         let mut accept_workers = spawn_accept_workers(self.listeners);
         let mut accepted = accept_workers.receiver;
         let active = Arc::new(AtomicUsize::new(0));
+        let handshake_timeout = self.config.handshake_timeout_value();
+        let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(());
 
         loop {
             tokio::select! {
@@ -452,6 +496,9 @@ impl Server {
 
                 _ = &mut signal => {
                     tracing::info!("Shutdown signal received; stopping native-tls listener on {}", self.addr);
+                    // Tell every established connection to finish its current
+                    // request and close instead of serving new ones.
+                    let _ = conn_shutdown_tx.send(());
                     break;
                 }
                 joined = connections.join_next(), if !connections.is_empty() => {
@@ -461,11 +508,19 @@ impl Server {
                     let Some(next) = next else {
                         break;
                     };
-                    let (stream, peer_addr) = next?;
-                    apply_stream_options(&stream, &self.config)?;
+                    let Some((stream, peer_addr)) = handle_accept_result(next, self.addr).await? else {
+                        continue;
+                    };
+                    if let Err(err) = apply_stream_options(&stream, &self.config) {
+                        tracing::warn!(peer = %peer_addr, error = %err,
+                            "dropping connection: failed to apply TCP options");
+                        continue;
+                    }
                     let info = ConnectionInfo { local_addr: self.addr, peer_addr };
                     if !try_admit_connection(&self.config, &active, info) {
-                        drop(stream);
+                        // Best-effort 503 so clients and load balancers see an
+                        // HTTP signal instead of a bare connection reset.
+                        reject_over_capacity(stream).await;
                         continue;
                     }
 
@@ -478,15 +533,30 @@ impl Server {
                     tracing::debug!("Accepted native-tls connection from {}", peer_addr);
                     shutdown_config.call_connected(info);
 
+                    let shutdown_rx = conn_shutdown_rx.clone();
                     connections.spawn(async move {
                         let _guard = ConnectionGuard::new(active, shutdown_config, info);
-                        match tls_config.accept(stream).await {
-                            Ok(tls_stream) => {
-                                run_connection(TokioIo::new(tls_stream), service, config, peer_addr).await;
+                        let handshake = async {
+                            match tls_config.accept(stream).await {
+                                Ok(tls_stream) => {
+                                    run_connection(TokioIo::new(tls_stream), service, config, peer_addr, shutdown_rx).await;
+                                }
+                                Err(err) => {
+                                    tracing::warn!("native-tls handshake failed from {}: {}", peer_addr, err)
+                                }
                             }
-                            Err(err) => {
-                                tracing::warn!("native-tls handshake failed from {}: {}", peer_addr, err)
+                        };
+                        match handshake_timeout {
+                            Some(limit) => {
+                                if tokio::time::timeout(limit, handshake).await.is_err() {
+                                    tracing::warn!(
+                                        peer = %peer_addr,
+                                        timeout = ?limit,
+                                        "native-tls handshake timed out; dropping connection"
+                                    );
+                                }
                             }
+                            None => handshake.await,
                         }
                     });
                 }
@@ -589,9 +659,20 @@ fn spawn_accept_workers(listeners: Vec<TcpListener>) -> AcceptWorkers {
         let sender = sender.clone();
         tasks.spawn(async move {
             loop {
-                let accepted = listener.accept().await;
-                if sender.send(accepted).await.is_err() {
-                    break;
+                match listener.accept().await {
+                    Ok(pair) => {
+                        if sender.send(Ok(pair)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        // Pace persistent failures instead of spinning the
+                        // channel full of errors; the main loop classifies them.
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                        if sender.send(Err(err)).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -599,6 +680,101 @@ fn spawn_accept_workers(listeners: Vec<TcpListener>) -> AcceptWorkers {
 
     drop(sender);
     AcceptWorkers { receiver, tasks }
+}
+
+/// Classify one accept result from the worker channel.
+///
+/// Transient per-connection failures (`ECONNABORTED`, `EINTR`, `EWOULDBLOCK`)
+/// and resource-exhaustion conditions (fd/memory pressure) are logged and
+/// skipped — a single failed accept must never stop the server. Only genuinely
+/// fatal socket errors (bad descriptor, invalid argument, permission denied)
+/// are propagated to the caller.
+async fn handle_accept_result(
+    result: io::Result<(TcpStream, SocketAddr)>,
+    listener_addr: SocketAddr,
+) -> Result<Option<(TcpStream, SocketAddr)>, BoxError> {
+    let (stream, peer_addr) = match result {
+        Ok(pair) => pair,
+        Err(err) => {
+            match err.kind() {
+                // Transient per-connection failures — safe to continue.
+                io::ErrorKind::ConnectionAborted
+                | io::ErrorKind::WouldBlock
+                | io::ErrorKind::Interrupted => {
+                    tracing::debug!(listener = %listener_addr, error = %err,
+                        "transient accept error; continuing");
+                    return Ok(None);
+                }
+                _ if is_fatal_accept_error(&err) => return Err(err.into()),
+                _ => {
+                    // Anything else is treated as (possibly) transient.
+                    // Resource exhaustion gets a short backoff so the OS can
+                    // drain descriptors before the next attempt.
+                    if is_resource_exhaustion(&err) {
+                        tracing::warn!(listener = %listener_addr, error = %err,
+                            "resource exhaustion on accept; backing off 100ms");
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    } else {
+                        tracing::warn!(listener = %listener_addr, error = %err,
+                            "accept error; continuing");
+                    }
+                    return Ok(None);
+                }
+            }
+        }
+    };
+    Ok(Some((stream, peer_addr)))
+}
+
+/// Errors that indicate the listener itself is broken — serving cannot continue.
+fn is_fatal_accept_error(err: &io::Error) -> bool {
+    const EBADF: i32 = 9; // listener closed / not a socket
+    const EINVAL: i32 = 22; // listener in an unusable state
+
+    matches!(err.kind(), io::ErrorKind::PermissionDenied)
+        || matches!(err.raw_os_error(), Some(EBADF) | Some(EINVAL))
+}
+
+/// fd/memory exhaustion conditions that occur under load (EMFILE/ENFILE/
+/// ENOMEM/ENOBUFS). EMFILE=24 and ENFILE=23 share values on Linux and macOS;
+/// ENOBUFS differs (Linux 105, macOS 55).
+fn is_resource_exhaustion(err: &io::Error) -> bool {
+    const EMFILE: i32 = 24;
+    const ENFILE: i32 = 23;
+    const ENOMEM: i32 = 12;
+
+    #[cfg(target_os = "linux")]
+    const ENOBUFS: i32 = 105;
+    #[cfg(not(target_os = "linux"))]
+    const ENOBUFS: i32 = 55;
+
+    matches!(err.kind(), io::ErrorKind::OutOfMemory)
+        || matches!(
+            err.raw_os_error(),
+            Some(EMFILE) | Some(ENFILE) | Some(ENOMEM) | Some(ENOBUFS)
+        )
+}
+
+/// Write a minimal `503 Service Unavailable` and close.
+///
+/// Used when the configured connection limit is exhausted. Never panics and
+/// never blocks longer than two seconds — if the write fails, the socket is
+/// dropped as before.
+async fn reject_over_capacity(mut stream: TcpStream) {
+    use tokio::io::AsyncWriteExt as _;
+
+    let body = "{\"error\":\"Service Unavailable\",\"code\":503}";
+    let response = format!(
+        "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n         Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+
+    let _ = tokio::time::timeout(Duration::from_secs(2), async move {
+        let _ = stream.write_all(response.as_bytes()).await;
+        let _ = stream.shutdown().await;
+    })
+    .await;
 }
 
 fn apply_stream_options(stream: &TcpStream, config: &ServerConfig) -> io::Result<()> {
@@ -746,6 +922,7 @@ async fn run_connection<I>(
     service: BoxCloneService,
     config: ServerConfig,
     peer_addr: SocketAddr,
+    mut shutdown_rx: watch::Receiver<()>,
 ) where
     I: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
 {
@@ -763,10 +940,36 @@ async fn run_connection<I>(
     });
 
     let builder = config.auto_builder();
+
+    // Serve requests until shutdown is signalled. On signal, tell hyper to
+    // stop taking NEW requests: idle keep-alive connections close immediately
+    // and in-flight responses are allowed to finish — instead of serving new
+    // requests for the whole drain window and then being hard-aborted.
+    //
+    // The plain and upgrade-capable connections are distinct types, so each
+    // branch runs its own shutdown-aware select.
     let result = if config.is_http2_only() {
-        builder.serve_connection(io, hyper_svc).await
+        let conn = builder.serve_connection(io, hyper_svc);
+        tokio::pin!(conn);
+        tokio::select! {
+            biased;
+            res = &mut conn => res,
+            _ = shutdown_rx.changed() => {
+                conn.as_mut().graceful_shutdown();
+                (&mut conn).await
+            }
+        }
     } else {
-        builder.serve_connection_with_upgrades(io, hyper_svc).await
+        let conn = builder.serve_connection_with_upgrades(io, hyper_svc);
+        tokio::pin!(conn);
+        tokio::select! {
+            biased;
+            res = &mut conn => res,
+            _ = shutdown_rx.changed() => {
+                conn.as_mut().graceful_shutdown();
+                (&mut conn).await
+            }
+        }
     };
 
     if let Err(err) = result {
@@ -837,6 +1040,48 @@ impl tower_service::Service<Request> for MethodRouterService {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn connection_aborted_is_skipped_not_fatal() {
+        let err = io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            "client reset before accept",
+        );
+        let out = handle_accept_result(Err(err), "127.0.0.1:8080".parse().unwrap())
+            .await
+            .unwrap();
+        assert!(out.is_none());
+    }
+
+    #[tokio::test]
+    async fn fd_exhaustion_backs_off_and_skips_instead_of_dying() {
+        // EMFILE — the classic under-load accept failure.
+        let err = io::Error::from_raw_os_error(24);
+        assert!(is_resource_exhaustion(&err));
+        let out = handle_accept_result(Err(err), "127.0.0.1:8080".parse().unwrap())
+            .await
+            .unwrap();
+        assert!(out.is_none());
+    }
+
+    #[tokio::test]
+    async fn broken_listener_still_stops_the_server() {
+        // EBADF — the listener itself is gone; serving cannot continue.
+        let err = io::Error::from_raw_os_error(9);
+        assert!(is_fatal_accept_error(&err));
+        let out = handle_accept_result(Err(err), "127.0.0.1:8080".parse().unwrap()).await;
+        assert!(out.is_err());
+    }
+
+    #[test]
+    fn fatal_classification_matches_only_broken_listeners() {
+        assert!(is_fatal_accept_error(&io::Error::from_raw_os_error(22))); // EINVAL
+        assert!(!is_fatal_accept_error(&io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            "x"
+        )));
+        assert!(!is_fatal_accept_error(&io::Error::other("plain")));
+    }
 
     #[tokio::test]
     async fn default_bind_path_works() {

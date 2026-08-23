@@ -44,12 +44,13 @@ where
             return Err(FormRejection::InvalidContentType);
         }
 
-        // Read body
-        let body_bytes = req
-            .into_body()
-            .to_bytes()
-            .await
-            .map_err(|e| FormRejection::BodyReadFailed(e.to_string()))?;
+        // Read body under the configured size limit (2 MiB by default)
+        let limit = arvik_core::body_limit::resolve_limit(req.extensions());
+        let body_bytes = match req.into_body().to_bytes_limited(limit).await {
+            Ok(bytes) => bytes,
+            Err(e) if e.is_payload_too_large() => return Err(FormRejection::PayloadTooLarge),
+            Err(e) => return Err(FormRejection::BodyReadFailed(e.to_string())),
+        };
 
         // Deserialize
         let value = serde_urlencoded::from_bytes(&body_bytes)
@@ -71,7 +72,60 @@ fn form_content_type(headers: &http::HeaderMap) -> bool {
         Err(_) => return false,
     };
 
-    content_type
-        .to_lowercase()
-        .starts_with("application/x-www-form-urlencoded")
+    // Parse as a media type so parameter suffixes (`;charset=utf-8`) pass but
+    // bogus extensions (`…urlencodedfoo`) do not.
+    match content_type.parse::<mime::Mime>() {
+        Ok(mime) => mime.type_() == mime::APPLICATION && mime.subtype() == "x-www-form-urlencoded",
+        Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod body_limit_tests {
+    use super::*;
+    use arvik_core::Body;
+    use arvik_core::body_limit::{DEFAULT_BODY_LIMIT, DefaultBodyLimit};
+
+    fn form_request(body: Body) -> Request {
+        Request::new(
+            http::Request::builder()
+                .method(http::Method::POST)
+                .uri("/")
+                .header(
+                    http::header::CONTENT_TYPE,
+                    "application/x-www-form-urlencoded",
+                )
+                .body(body)
+                .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn oversized_form_is_rejected_with_413() {
+        let big = "k=v&".repeat(DEFAULT_BODY_LIMIT / 2);
+        let req = form_request(Body::from_bytes(big.into_bytes().into()));
+        match Form::<std::collections::HashMap<String, String>>::from_request(req, &()).await {
+            Err(FormRejection::PayloadTooLarge) => {}
+            other => panic!("expected PayloadTooLarge, got {:?}", other.err()),
+        }
+    }
+
+    #[tokio::test]
+    async fn form_within_limit_extracts() {
+        let req = form_request(Body::from_bytes(b"user=darshan".to_vec().into()));
+        let Form(value) = Form::<std::collections::HashMap<String, String>>::from_request(req, &())
+            .await
+            .unwrap();
+        assert_eq!(value["user"], "darshan");
+    }
+
+    #[tokio::test]
+    async fn default_body_limit_extension_tightens_form_limit() {
+        let mut req = form_request(Body::from_bytes(b"user=darshan".to_vec().into()));
+        req.extensions_mut().insert(DefaultBodyLimit::max(4));
+        match Form::<std::collections::HashMap<String, String>>::from_request(req, &()).await {
+            Err(FormRejection::PayloadTooLarge) => {}
+            other => panic!("expected PayloadTooLarge, got {:?}", other.err()),
+        }
+    }
 }

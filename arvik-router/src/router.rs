@@ -13,9 +13,9 @@
 //!
 //! After calling [`Router::with_state`] you receive a `Router<()>`. Call
 //! [`Router::into_service`] to obtain a [`BoxCloneService`] with all layers
-//! baked in, ready to be passed to [`arvik_hyper::Server::serve_service`].
+//! baked in, ready to be passed to `arvik_hyper::Server::serve_service`.
 //!
-//! [`arvik_hyper::serve_app`] calls `into_service()` internally.
+//! `arvik_hyper::serve_app` calls `into_service()` internally.
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -160,7 +160,6 @@ pub struct Router<S = ()> {
 struct RouteEntry<S> {
     pattern: Arc<str>,
     method_router: MethodRouter<S>,
-    param_names: Arc<[Arc<str>]>,
 }
 
 impl<S> RouteEntry<S> {
@@ -168,7 +167,6 @@ impl<S> RouteEntry<S> {
         Self {
             pattern: Arc::from(path),
             method_router,
-            param_names: extract_param_names(path).into(),
         }
     }
 }
@@ -224,8 +222,32 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     }
 
     /// Mount a sub-router under a path prefix (flatten strategy).
+    ///
+    /// Middleware attached to the sub-router (`.layer()` / `.route_layer()`)
+    /// is preserved by folding it onto each flattened route. Note the
+    /// flattening caveat: those layers run only on **matched** sub-router
+    /// routes — unmatched paths in the prefix fall through to this router's
+    /// fallback, like any other unmatched path.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the sub-router has its own `.fallback()`: flattened routing
+    /// cannot scope a fallback to the prefix. Set `.fallback()` on the outer
+    /// router instead.
     pub fn nest(mut self, prefix: &str, other: Router<S>) -> Self {
         let prefix = prefix.trim_end_matches('/');
+        if other.fallback.is_some() {
+            panic!(
+                "nest(\"{prefix}\"): the sub-router has a `.fallback()`, which cannot be \
+                 scoped under a prefix when routes are flattened. Set `.fallback()` on the \
+                 outer router instead."
+            );
+        }
+        // Preserve middleware attached inside the sub-router by folding it
+        // onto every flattened route's method-router layer stack:
+        // handler ← method layers ← sub route_layers ← sub layers.
+        let mut sub_layers = other.route_layers;
+        sub_layers.extend(other.layers);
         for entry in other.routes {
             let path = entry.pattern.as_ref();
             let full = if path == "/" {
@@ -237,20 +259,31 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
             if let Err(e) = self.trie.insert(&full, idx) {
                 panic!("Nested route conflict for `{full}`: {e}");
             }
-            self.routes
-                .push(RouteEntry::new(&full, entry.method_router));
+            let mut method_router = entry.method_router;
+            method_router.extend_layers(sub_layers.iter().cloned());
+            self.routes.push(RouteEntry::new(&full, method_router));
         }
         self
     }
 
     /// Merge all routes from another router into this one.
+    ///
+    /// Middleware attached to the merged router is preserved by folding it
+    /// onto each merged route; a merged `.fallback()` is adopted when this
+    /// router has none.
     pub fn merge(mut self, other: Router<S>) -> Self {
+        let mut sub_layers = other.route_layers;
+        sub_layers.extend(other.layers);
         for entry in other.routes {
             let path = entry.pattern.as_ref();
             let idx = self.routes.len();
             if let Err(e) = self.trie.insert(path, idx) {
                 panic!("Merge conflict for `{path}`: {e}");
             }
+            let mut entry = entry;
+            entry
+                .method_router
+                .extend_layers(sub_layers.iter().cloned());
             self.routes.push(entry);
         }
         if self.fallback.is_none() {
@@ -322,8 +355,11 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.layers.push(into_layer_fn(layer));
@@ -332,7 +368,7 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
 
     /// Apply a Tower middleware layer to **matched routes only**.
     ///
-    /// Unlike [`layer`], this does not run on 404/405 responses.
+    /// Unlike `layer`, this does not run on 404/405 responses.
     /// Processes the request **after** outer layers but **before** per-method layers.
     ///
     /// ```rust,ignore
@@ -344,8 +380,11 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     pub fn route_layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.route_layers.push(into_layer_fn(layer));
@@ -356,8 +395,8 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
 
     /// Bind application state, converting `Router<S>` → `Router<()>`.
     ///
-    /// Call this once before passing your router to [`serve_app`] or
-    /// [`into_service`].
+    /// Call this once before passing your router to `serve_app` or
+    /// `into_service`.
     pub fn with_state(self, state: S) -> Router<()> {
         let state = Arc::new(state);
 
@@ -367,7 +406,6 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
             .map(|entry| RouteEntry {
                 pattern: entry.pattern,
                 method_router: entry.method_router.with_state((*state).clone()),
-                param_names: entry.param_names,
             })
             .collect();
 
@@ -392,7 +430,7 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     /// Dispatch a request directly, **without** applying outer layers.
     ///
     /// This method exists for backward compatibility and internal testing.
-    /// For production serving use [`into_service`] (via [`serve_app`]).
+    /// For production serving use `into_service` (via `serve_app`).
     pub async fn call(&self, mut req: Request, state: S) -> Response {
         let path = req.uri().path();
 
@@ -404,13 +442,11 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
 
                 if !matched.params.is_empty() {
                     let mut pp = PathParams::new();
-                    for (idx, (k, v)) in matched.params.iter().enumerate() {
-                        let key = entry
-                            .param_names
-                            .get(idx)
-                            .cloned()
-                            .unwrap_or_else(|| Arc::from(k));
-                        pp.push(key, percent_decode(v));
+                    // matchit's keys are the declared names — including
+                    // mid-segment params like `{id}.png` that positional
+                    // pattern parsing cannot align with.
+                    for (k, v) in matched.params.iter() {
+                        pp.push(Arc::from(k), percent_decode(v).into_owned());
                     }
                     req.extensions_mut().insert(pp);
                 }
@@ -459,12 +495,29 @@ impl Router<()> {
         let route_layers = self.route_layers;
         let outer_layers = self.layers;
 
-        // Inner core: route dispatch + route_layers
+        // Pre-fold the router-level route_layers into each entry ONCE, so the
+        // per-request path clones a ready-made service instead of deep-cloning
+        // the MethodRouter and re-wrapping every layer on every request.
+        let layered_routes: Vec<Option<BoxCloneService>> = self
+            .routes
+            .iter()
+            .map(|entry| {
+                if route_layers.is_empty() {
+                    None
+                } else {
+                    let base =
+                        BoxCloneService::new(MethodRouterService(entry.method_router.clone()));
+                    Some(apply_layers(base, &route_layers))
+                }
+            })
+            .collect();
+
+        // Inner core: route dispatch + prebuilt layered services
         let inner = Arc::new(RouterInner {
             trie: self.trie,
             routes: self.routes,
             fallback: self.fallback,
-            route_layers,
+            layered_routes,
         });
 
         // Wrap in a clone-friendly Tower service
@@ -489,7 +542,9 @@ struct RouterInner {
     trie: matchit::Router<usize>,
     routes: Vec<RouteEntry<()>>,
     fallback: Option<Box<dyn ErasedHandler<()>>>,
-    route_layers: Vec<LayerFn>,
+    /// Pre-folded `route_layer(method_router)` services, index-aligned with
+    /// `routes`; `None` when the route has no router-level layers.
+    layered_routes: Vec<Option<BoxCloneService>>,
 }
 
 impl RouterInner {
@@ -504,25 +559,21 @@ impl RouterInner {
 
                 if !matched.params.is_empty() {
                     let mut pp = PathParams::new();
-                    for (idx, (k, v)) in matched.params.iter().enumerate() {
-                        let key = entry
-                            .param_names
-                            .get(idx)
-                            .cloned()
-                            .unwrap_or_else(|| Arc::from(k));
-                        pp.push(key, percent_decode(v));
+                    // matchit's keys are the declared names — including
+                    // mid-segment params like `{id}.png` that positional
+                    // pattern parsing cannot align with.
+                    for (k, v) in matched.params.iter() {
+                        pp.push(Arc::from(k), percent_decode(v).into_owned());
                     }
                     req.extensions_mut().insert(pp);
                 }
                 req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
-                let mut response = if self.route_layers.is_empty() {
-                    entry.method_router.call(req, ()).await
-                } else {
-                    let base =
-                        BoxCloneService::new(MethodRouterService(entry.method_router.clone()));
-                    let svc = apply_layers(base, &self.route_layers);
-                    oneshot(svc, req).await
+                // Cloning the prebuilt stack is an O(1)-per-wrapper bump now
+                // that MethodRouter shares its handlers behind an Arc.
+                let mut response = match self.layered_routes[idx].as_ref() {
+                    Some(svc) => oneshot(svc.clone(), req).await,
+                    None => entry.method_router.call(req, ()).await,
                 };
                 response.extensions_mut().insert(MatchedPathExt(pattern));
                 response
@@ -614,28 +665,32 @@ fn normalize_service_prefix(prefix: &str) -> String {
     }
 }
 
-fn extract_param_names(path: &str) -> Vec<Arc<str>> {
-    path.split('/')
-        .filter_map(|segment| {
-            let inner = segment.strip_prefix('{')?.strip_suffix('}')?;
-            let name = inner.strip_prefix('*').unwrap_or(inner);
-            (!name.is_empty()).then(|| Arc::from(name))
-        })
-        .collect()
-}
-
 /// Percent-decode a URL path segment in-place (ASCII-only fast path).
-fn percent_decode(input: &str) -> String {
+/// Percent-decode a URL path segment (ASCII-only fast path).
+///
+/// Decoding happens *after* route matching, so decoded values are handed to
+/// handlers verbatim. Sequences that would change segment structure or smuggle
+/// control characters are therefore kept encoded: `%2F` (`/`) and `%5C` (`\`)
+/// cannot introduce separators into captured params, and `%00`, `%0A`, `%0D`
+/// stay escaped so NUL/CRLF cannot reach handlers, filesystems, or logs
+/// through decoded values. Literal separators in the URL are unaffected.
+fn percent_decode(input: &str) -> std::borrow::Cow<'_, str> {
     let bytes = input.as_bytes();
     if !bytes.contains(&b'%') {
-        return input.to_string(); // fast path: nothing to decode
+        return std::borrow::Cow::Borrowed(input); // fast path: nothing to decode
     }
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
             if let (Some(hi), Some(lo)) = (hex_nibble(bytes[i + 1]), hex_nibble(bytes[i + 2])) {
-                out.push(hi << 4 | lo);
+                let decoded = hi << 4 | lo;
+                if matches!(decoded, b'/' | b'\\' | 0x00 | b'\n' | b'\r') {
+                    // Preserve the escape — see doc comment.
+                    out.extend_from_slice(&bytes[i..i + 3]);
+                } else {
+                    out.push(decoded);
+                }
                 i += 3;
                 continue;
             }
@@ -643,7 +698,7 @@ fn percent_decode(input: &str) -> String {
         out.push(bytes[i]);
         i += 1;
     }
-    String::from_utf8(out).unwrap_or_else(|_| input.to_string())
+    std::borrow::Cow::Owned(String::from_utf8(out).unwrap_or_else(|_| input.to_string()))
 }
 
 #[inline]
@@ -665,16 +720,23 @@ mod tests {
     #[test]
     fn test_percent_decode() {
         assert_eq!(percent_decode("hello%20world"), "hello world");
-        assert_eq!(percent_decode("foo%2Fbar"), "foo/bar");
         assert_eq!(percent_decode("normal"), "normal");
         assert_eq!(percent_decode("100%25"), "100%");
     }
 
     #[test]
-    fn extracts_param_names_at_registration_time() {
-        let names = extract_param_names("/users/{id}/files/{*path}");
-        let names: Vec<_> = names.iter().map(|name| name.as_ref()).collect();
-        assert_eq!(names, vec!["id", "path"]);
+    fn percent_decode_keeps_structure_changing_escapes_encoded() {
+        // Encoded separators must not become real separators post-match.
+        assert_eq!(percent_decode("foo%2Fbar"), "foo%2Fbar");
+        assert_eq!(percent_decode("a%5Cb"), "a%5Cb");
+        // Control characters stay escaped.
+        assert_eq!(percent_decode("a%00b"), "a%00b");
+        assert_eq!(percent_decode("a%0d%0Ab"), "a%0d%0Ab");
+        // Ordinary decodes still work.
+        assert_eq!(percent_decode("a%2Eb"), "a.b");
+        assert_eq!(percent_decode("%e2%82%ac"), "\u{20ac}");
+        // Invalid UTF-8 falls back to the input unchanged.
+        assert_eq!(percent_decode("%ff"), "%ff");
     }
 
     #[test]
@@ -857,7 +919,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn param_route_uses_interned_names_and_decodes_values() {
+    async fn mid_segment_params_expose_their_declared_names() {
+        async fn h(req: arvik_core::Request) -> String {
+            let params = req.extensions().get::<PathParams>().unwrap();
+            format!(
+                "{}:{}",
+                params.get("id").unwrap_or("MISSING"),
+                params.get("tag").unwrap_or("MISSING")
+            )
+        }
+
+        // matchit supports mid-segment params; positional pattern parsing used
+        // to misalign these (audit L2).
+        let mut app = Router::new()
+            .route("/images/img{id}.png/{tag}", crate::get(h))
+            .into_service();
+        let req = Request::new(
+            http::Request::builder()
+                .uri("/images/img7.png/nature")
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        );
+
+        let res = app.call(req).await.unwrap();
+        let text = String::from_utf8(res.into_body().to_bytes().await.unwrap().to_vec()).unwrap();
+        assert_eq!(text, "7:nature");
+    }
+
+    #[tokio::test]
+    async fn param_route_decodes_values() {
         async fn h(req: arvik_core::Request) -> String {
             let params = req.extensions().get::<PathParams>().unwrap();
             format!(
@@ -900,5 +990,133 @@ mod tests {
         let a = Router::new().route("/users", crate::get(h));
         let b = Router::new().route("/users", crate::get(h));
         let _: Router<()> = a.merge(b);
+    }
+
+    // ── nest/merge middleware preservation (audit H3) ────────────────────────
+
+    /// Layer that appends its tag to the `x-mark` response header.
+    #[derive(Clone)]
+    struct MarkLayer(&'static str);
+
+    impl Layer<BoxCloneService> for MarkLayer {
+        type Service = MarkService;
+
+        fn layer(&self, inner: BoxCloneService) -> Self::Service {
+            MarkService { inner, tag: self.0 }
+        }
+    }
+
+    #[derive(Clone)]
+    struct MarkService {
+        inner: BoxCloneService,
+        tag: &'static str,
+    }
+
+    impl Service<Request> for MarkService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: Request) -> Self::Future {
+            let cloned = self.inner.clone();
+            let mut inner = std::mem::replace(&mut self.inner, cloned);
+            let value = self.tag.parse().unwrap();
+            Box::pin(async move {
+                let mut res = inner
+                    .call(req)
+                    .await
+                    .unwrap_or_else(|infallible| match infallible {});
+                res.headers_mut().append("x-mark", value);
+                Ok(res)
+            })
+        }
+    }
+
+    async fn marked_handler() -> &'static str {
+        "inner"
+    }
+
+    fn get_req(path: &str) -> Request {
+        Request::new(
+            http::Request::builder()
+                .method(http::Method::GET)
+                .uri(path)
+                .body(arvik_core::Body::empty())
+                .unwrap(),
+        )
+    }
+
+    #[tokio::test]
+    async fn nest_preserves_subrouter_layers_and_route_layers() {
+        let sub = Router::new()
+            .route("/inner", crate::get(marked_handler))
+            .route_layer(MarkLayer("route"))
+            .layer(MarkLayer("wide"));
+        let app: Router<()> = Router::new().nest("/sub", sub);
+
+        // Matched nested route carries both sub-router layers (outer first).
+        let res = app.call(get_req("/sub/inner"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let marks: Vec<_> = res
+            .headers()
+            .get_all("x-mark")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
+        assert_eq!(marks, vec!["route", "wide"]);
+    }
+
+    #[tokio::test]
+    async fn nested_layers_do_not_leak_outside_the_prefix_or_to_unmatched_paths() {
+        async fn outer_handler() -> &'static str {
+            "outer"
+        }
+        let sub = Router::new()
+            .route("/inner", crate::get(marked_handler))
+            .layer(MarkLayer("sub"));
+        let app: Router<()> = Router::new()
+            .route("/own", crate::get(outer_handler))
+            .nest("/sub", sub);
+
+        // Parent's own route is untouched by sub-router layers.
+        let res = app.call(get_req("/own"), ()).await;
+        assert!(res.headers().get("x-mark").is_none());
+
+        // Unmatched path under the prefix: no sub-router layer runs (404).
+        let res = app.call(get_req("/sub/missing"), ()).await;
+        assert_eq!(res.status(), StatusCode::NOT_FOUND);
+        assert!(res.headers().get("x-mark").is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "cannot be scoped")]
+    fn nest_rejects_subrouter_fallback_instead_of_dropping_it() {
+        async fn h() -> &'static str {
+            "ok"
+        }
+        let sub: Router<()> = Router::new().route("/inner", crate::get(h)).fallback(h);
+        let _: Router<()> = Router::new().nest("/sub", sub);
+    }
+
+    #[tokio::test]
+    async fn merge_preserves_merged_router_layers() {
+        let sub = Router::new()
+            .route("/a", crate::get(marked_handler))
+            .route_layer(MarkLayer("merged"));
+        let app: Router<()> = Router::new().merge(sub);
+
+        let res = app.call(get_req("/a"), ()).await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let marks: Vec<&str> = res
+            .headers()
+            .get_all("x-mark")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
+        assert_eq!(marks, vec!["merged"]);
     }
 }

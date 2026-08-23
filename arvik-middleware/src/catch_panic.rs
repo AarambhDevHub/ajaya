@@ -1,10 +1,12 @@
 //! Panic recovery middleware.
 //!
 //! Catches panics in handlers and returns a `500 Internal Server Error`
-//! response instead of crashing the server task.
+//! response instead of crashing the connection task.
 //!
-//! Uses `tokio::task::spawn` under the hood — if the spawned task panics,
-//! the `JoinError` is caught and converted to a 500 response.
+//! Wraps the handler future in `catch_unwind` directly — zero per-request
+//! overhead. Note: panics raised later, while *polling the response body
+//! stream*, happen outside this wrapper (the body is driven by hyper after
+//! the response is returned).
 //!
 //! # Example
 //!
@@ -23,6 +25,7 @@
 //!     }));
 //! ```
 
+use futures_util::FutureExt as _;
 use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
@@ -111,15 +114,19 @@ where
         let panic_handler = self.panic_handler.clone();
 
         Box::pin(async move {
-            // Spawn onto a new task so we can catch panics via JoinError
-            let handle = tokio::task::spawn(async move { inner.call(req).await });
-
-            match handle.await {
+            // catch_unwind on the future directly — no per-request task spawn,
+            // which cost an allocation + scheduling round-trip on 100% of
+            // requests to handle the rare panic case.
+            //
+            // AssertUnwindSafe: the tower service contract (clone-per-call,
+            // infallible) already treats inner state as recoverable.
+            match std::panic::AssertUnwindSafe(inner.call(req))
+                .catch_unwind()
+                .await
+            {
                 Ok(Ok(response)) => Ok(response),
                 Ok(Err(infallible)) => match infallible {},
-                Err(join_error) => {
-                    let panic_payload = join_error.into_panic();
-
+                Err(panic_payload) => {
                     let panic_msg = panic_payload
                         .downcast_ref::<&str>()
                         .copied()

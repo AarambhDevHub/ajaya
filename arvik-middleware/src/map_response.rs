@@ -3,7 +3,7 @@
 //! Create middleware that **transforms only the response** after the handler
 //! runs. The request is passed through unchanged.
 //!
-//! Slightly more efficient than [`from_fn`] when you only need to mutate
+//! Slightly more efficient than `from_fn` when you only need to mutate
 //! the response (no request inspection).
 
 use std::convert::Infallible;
@@ -21,7 +21,7 @@ use tower_service::Service;
 /// Create middleware that **transforms only the response** after the handler
 /// runs. The request is passed through unchanged.
 ///
-/// Slightly more efficient than [`from_fn`] when you only need to mutate
+/// Slightly more efficient than `from_fn` when you only need to mutate
 /// the response (no request inspection).
 ///
 /// ### Example

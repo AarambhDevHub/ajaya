@@ -198,7 +198,7 @@ where
                     .map(|s| s.to_string());
 
                 match header_token {
-                    Some(h) if h == csrf_token.as_str() => {
+                    Some(h) if crate::auth::secret_eq(&h, csrf_token.as_str()) => {
                         // Valid — proceed
                     }
                     Some(bad) => {

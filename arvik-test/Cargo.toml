@@ -10,6 +10,7 @@ readme.workspace = true
 description = "Testing utilities for the Arvik web framework"
 
 [dependencies]
+httpdate       = { workspace = true }
 arvik-core = { workspace = true }
 arvik-router = { workspace = true }
 arvik-hyper = { workspace = true, optional = true }
