@@ -13,11 +13,11 @@ use std::fmt;
 
 /// A serde deserializer for path parameters.
 pub(crate) struct PathDeserializer<'de> {
-    params: &'de [(String, String)],
+    params: &'de [(&'de str, &'de str)],
 }
 
 impl<'de> PathDeserializer<'de> {
-    pub(crate) fn new(params: &'de [(String, String)]) -> Self {
+    pub(crate) fn new(params: &'de [(&'de str, &'de str)]) -> Self {
         Self { params }
     }
 }
@@ -27,7 +27,7 @@ macro_rules! delegate_single {
         $(
             fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
                 if self.params.len() == 1 {
-                    ValueDeserializer(self.params[0].1.clone()).$method(visitor)
+                    ValueDeserializer(self.params[0].1).$method(visitor)
                 } else {
                     Err(PathDeserializeError::custom(concat!(
                         "expected single path parameter for ",
@@ -44,7 +44,7 @@ impl<'de> Deserializer<'de> for PathDeserializer<'de> {
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         if self.params.len() == 1 {
-            visitor.visit_string(self.params[0].1.clone())
+            visitor.visit_str(self.params[0].1)
         } else {
             self.deserialize_map(visitor)
         }
@@ -99,7 +99,7 @@ impl<'de> Deserializer<'de> for PathDeserializer<'de> {
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
         if self.params.len() == 1 {
-            visitor.visit_enum(self.params[0].1.clone().into_enum_deserializer())
+            visitor.visit_enum(StringEnumDeserializer(self.params[0].1))
         } else {
             Err(PathDeserializeError::custom(
                 "enums can only be extracted from a single path parameter",
@@ -109,7 +109,7 @@ impl<'de> Deserializer<'de> for PathDeserializer<'de> {
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         if self.params.len() == 1 {
-            ValueDeserializer(self.params[0].1.clone()).deserialize_option(visitor)
+            ValueDeserializer(self.params[0].1).deserialize_option(visitor)
         } else {
             Err(PathDeserializeError::custom(
                 "expected single path parameter for option",
@@ -134,12 +134,12 @@ impl<'de> Deserializer<'de> for PathDeserializer<'de> {
 // ---------------------------------------------------------------------------
 
 struct PathMapAccess<'de> {
-    params: &'de [(String, String)],
+    params: &'de [(&'de str, &'de str)],
     index: usize,
 }
 
 impl<'de> PathMapAccess<'de> {
-    fn new(params: &'de [(String, String)]) -> Self {
+    fn new(params: &'de [(&'de str, &'de str)]) -> Self {
         Self { params, index: 0 }
     }
 }
@@ -155,7 +155,7 @@ impl<'de> MapAccess<'de> for PathMapAccess<'de> {
             return Ok(None);
         }
         let key = &self.params[self.index].0;
-        seed.deserialize(key.as_str().into_deserializer()).map(Some)
+        seed.deserialize(key.into_deserializer()).map(Some)
     }
 
     fn next_value_seed<V: DeserializeSeed<'de>>(
@@ -164,7 +164,7 @@ impl<'de> MapAccess<'de> for PathMapAccess<'de> {
     ) -> Result<V::Value, Self::Error> {
         let value = &self.params[self.index].1;
         self.index += 1;
-        seed.deserialize(ValueDeserializer(value.clone()))
+        seed.deserialize(ValueDeserializer(value))
     }
 }
 
@@ -173,12 +173,12 @@ impl<'de> MapAccess<'de> for PathMapAccess<'de> {
 // ---------------------------------------------------------------------------
 
 struct PathSeqAccess<'de> {
-    params: &'de [(String, String)],
+    params: &'de [(&'de str, &'de str)],
     index: usize,
 }
 
 impl<'de> PathSeqAccess<'de> {
-    fn new(params: &'de [(String, String)]) -> Self {
+    fn new(params: &'de [(&'de str, &'de str)]) -> Self {
         Self { params, index: 0 }
     }
 }
@@ -195,7 +195,7 @@ impl<'de> SeqAccess<'de> for PathSeqAccess<'de> {
         }
         let value = &self.params[self.index].1;
         self.index += 1;
-        seed.deserialize(ValueDeserializer(value.clone())).map(Some)
+        seed.deserialize(ValueDeserializer(value)).map(Some)
     }
 }
 
@@ -203,17 +203,17 @@ impl<'de> SeqAccess<'de> for PathSeqAccess<'de> {
 // Value deserializer (parses a single string value into typed values)
 // ---------------------------------------------------------------------------
 
-struct ValueDeserializer(String);
+struct ValueDeserializer<'de>(&'de str);
 
-impl<'de> Deserializer<'de> for ValueDeserializer {
+impl<'de> Deserializer<'de> for ValueDeserializer<'de> {
     type Error = PathDeserializeError;
 
     fn deserialize_any<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_string(self.0)
+        visitor.visit_str(self.0)
     }
 
     fn deserialize_bool<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        match self.0.as_str() {
+        match self.0 {
             "true" | "1" => visitor.visit_bool(true),
             "false" | "0" => visitor.visit_bool(false),
             _ => Err(PathDeserializeError::custom(format!(
@@ -304,11 +304,11 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
     }
 
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_string(self.0)
+        visitor.visit_str(self.0)
     }
 
     fn deserialize_str<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        visitor.visit_string(self.0)
+        visitor.visit_str(self.0)
     }
 
     fn deserialize_char<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -340,7 +340,7 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
         _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error> {
-        visitor.visit_enum(self.0.into_enum_deserializer())
+        visitor.visit_enum(StringEnumDeserializer(self.0))
     }
 
     forward_to_deserialize_any! {
@@ -353,9 +353,9 @@ impl<'de> Deserializer<'de> for ValueDeserializer {
 // String-as-enum deserializer
 // ---------------------------------------------------------------------------
 
-struct StringEnumDeserializer(String);
+struct StringEnumDeserializer<'de>(&'de str);
 
-impl<'de> de::EnumAccess<'de> for StringEnumDeserializer {
+impl<'de> de::EnumAccess<'de> for StringEnumDeserializer<'de> {
     type Error = PathDeserializeError;
     type Variant = UnitVariant;
 
@@ -402,20 +402,6 @@ impl<'de> de::VariantAccess<'de> for UnitVariant {
         Err(PathDeserializeError::custom(
             "struct variants not supported",
         ))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// IntoDeserializer helpers
-// ---------------------------------------------------------------------------
-
-trait IntoEnumDeserializer {
-    fn into_enum_deserializer(self) -> StringEnumDeserializer;
-}
-
-impl IntoEnumDeserializer for String {
-    fn into_enum_deserializer(self) -> StringEnumDeserializer {
-        StringEnumDeserializer(self)
     }
 }
 

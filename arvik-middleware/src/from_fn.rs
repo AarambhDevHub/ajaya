@@ -250,6 +250,7 @@ where
     Svc: Service<Request, Response = Response, Error = std::convert::Infallible>
         + Clone
         + Send
+        + Sync
         + 'static,
     Svc::Future: Send + 'static,
 {
@@ -306,6 +307,7 @@ where
     Svc: Service<Request, Response = Response, Error = std::convert::Infallible>
         + Clone
         + Send
+        + Sync
         + 'static,
     Svc::Future: Send + 'static,
 {

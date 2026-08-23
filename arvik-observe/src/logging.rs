@@ -309,8 +309,17 @@ where
     }
 
     fn call(&mut self, mut req: Request) -> Self::Future {
-        let method = req.method().as_str().to_string();
-        let uri = req.uri().to_string();
+        // Request-ID plumbing runs unconditionally (it is functional), but the
+        // span field strings are only built when INFO spans are actually
+        // enabled — otherwise every filtered-out request still paid several
+        // heap allocations.
+        let span_enabled = tracing::enabled!(tracing::Level::INFO);
+
+        let (method, uri) = if span_enabled {
+            (req.method().as_str().to_string(), req.uri().to_string())
+        } else {
+            (String::new(), String::new())
+        };
         let request_id = request_id(&req, &self.request_id_header);
 
         req.extensions_mut()
@@ -320,13 +329,17 @@ where
                 .insert(self.request_id_header.clone(), value);
         }
 
-        let span = request_span(
-            &method,
-            &uri,
-            &request_id,
-            self.include_headers
-                .then(|| masked_headers(req.headers(), &self.sensitive_headers)),
-        );
+        let span = if span_enabled {
+            request_span(
+                &method,
+                &uri,
+                &request_id,
+                self.include_headers
+                    .then(|| masked_headers(req.headers(), &self.sensitive_headers)),
+            )
+        } else {
+            tracing::Span::none()
+        };
 
         let request_id_header = self.request_id_header.clone();
         let request_id_for_response = request_id.clone();

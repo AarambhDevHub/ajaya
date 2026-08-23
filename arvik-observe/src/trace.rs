@@ -97,20 +97,26 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let method = req.method().as_str().to_owned();
-        let url = req.uri().to_string();
-        let user_agent = req
-            .headers()
-            .get(http::header::USER_AGENT)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_owned();
-        let parent = extract_parent(req.headers(), &self.propagators);
-        let span = make_http_span(&self.service_name, &method, &url, &user_agent);
+        // Skip all span construction (including the field strings and the
+        // propagator extraction) when INFO spans are filtered out anyway.
+        let span = if !tracing::enabled!(tracing::Level::INFO) {
+            tracing::Span::none()
+        } else {
+            let method = req.method().as_str().to_owned();
+            let url = req.uri().to_string();
+            let user_agent = req
+                .headers()
+                .get(http::header::USER_AGENT)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or("")
+                .to_owned();
+            let span = make_http_span(&self.service_name, &method, &url, &user_agent);
 
-        if let Some(parent) = parent {
-            let _ = span.set_parent(parent);
-        }
+            if let Some(parent) = extract_parent(req.headers(), &self.propagators) {
+                let _ = span.set_parent(parent);
+            }
+            span
+        };
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
@@ -234,9 +240,14 @@ impl OtelConfig {
         let builder = SdkTracerProvider::builder().with_resource(resource);
 
         match &self.exporter {
-            Exporter::Stdout => Ok(builder
-                .with_simple_exporter(opentelemetry_stdout::SpanExporter::default())
-                .build()),
+            Exporter::Stdout => {
+                // Batch, not simple: the simple processor serializes and
+                // writes each span inline on whichever task ends it — a
+                // synchronous stdout write on the request hot path.
+                Ok(builder
+                    .with_batch_exporter(opentelemetry_stdout::SpanExporter::default())
+                    .build())
+            }
             Exporter::OtlpGrpc(endpoint) => {
                 let mut exporter = opentelemetry_otlp::SpanExporter::builder().with_tonic();
                 if let Some(endpoint) = endpoint {

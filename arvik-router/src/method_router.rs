@@ -30,6 +30,9 @@ use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn, onesho
 
 // ── MethodRouter ────────────────────────────────────────────────────────────
 
+/// Shared, type-erased handler list.
+type HandlerList<S> = std::sync::Arc<Vec<(MethodFilter, Box<dyn ErasedHandler<S>>)>>;
+
 /// Stores one handler per HTTP method for a single route.
 ///
 /// Created via the top-level constructor functions [`get`], [`post`], etc.
@@ -42,19 +45,42 @@ use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn, onesho
 ///     .layer(RequireAuthLayer::new());
 /// ```
 pub struct MethodRouter<S = ()> {
-    /// (method_filter, type-erased handler) pairs.
-    handlers: Vec<(MethodFilter, Box<dyn ErasedHandler<S>>)>,
+    /// (method_filter, type-erased handler) pairs, shared behind an Arc so
+    /// cloning a router for per-request dispatch is an O(1) refcount bump
+    /// instead of deep-cloning every boxed handler.
+    handlers: HandlerList<S>,
     /// Bitmask of all registered methods — used to build the `Allow` header.
     allow_methods: MethodFilter,
     /// Tower layers applied to each matched handler (innermost = first in vec).
     layers: Vec<LayerFn>,
 }
 
+/// Mutable access to a handler list that may be shared behind an Arc.
+///
+/// During router construction the Arc is almost always unique, so this is a
+/// no-op there; sharing only appears once built routers get cloned.
+fn handlers_mut<S>(
+    handlers: &mut HandlerList<S>,
+) -> &mut Vec<(MethodFilter, Box<dyn ErasedHandler<S>>)>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    if std::sync::Arc::get_mut(handlers).is_none() {
+        *handlers = std::sync::Arc::new(
+            handlers
+                .iter()
+                .map(|(filter, handler)| (*filter, handler.clone_box()))
+                .collect(),
+        );
+    }
+    std::sync::Arc::get_mut(handlers).expect("just made unique")
+}
+
 impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// Create an empty `MethodRouter` with no handlers.
     pub fn new() -> Self {
         Self {
-            handlers: Vec::new(),
+            handlers: std::sync::Arc::new(Vec::new()),
             allow_methods: MethodFilter::NONE,
             layers: Vec::new(),
         }
@@ -67,7 +93,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         T: 'static,
     {
         self.allow_methods |= filter;
-        self.handlers.push((filter, into_erased(handler)));
+        handlers_mut(&mut self.handlers).push((filter, into_erased(handler)));
         self
     }
 
@@ -81,7 +107,8 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         }
 
         self.allow_methods |= other.allow_methods;
-        self.handlers.extend(other.handlers);
+        handlers_mut(&mut self.handlers)
+            .extend(other.handlers.iter().map(|(f, h)| (*f, h.clone_box())));
         self.layers.extend(other.layers);
         self
     }
@@ -173,8 +200,11 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.layers.push(into_layer_fn(layer));
@@ -201,7 +231,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         let head_falls_back_to_get =
             method == http::Method::HEAD && !self.allow_methods.contains(MethodFilter::HEAD);
 
-        for (filter, handler) in &self.handlers {
+        for (filter, handler) in self.handlers.iter() {
             let matched = filter.contains(method_filter)
                 || (head_falls_back_to_get && filter.contains(MethodFilter::GET));
             if matched {
@@ -258,17 +288,18 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// ```
     pub fn with_state(self, state: S) -> MethodRouter<()> {
         let state = Arc::new(state);
-        let handlers = self
-            .handlers
-            .into_iter()
-            .map(|(filter, handler)| {
-                let bound: Box<dyn ErasedHandler<()>> = Box::new(StateBound {
-                    inner: handler,
-                    state: Arc::clone(&state),
-                });
-                (filter, bound)
-            })
-            .collect();
+        let handlers = std::sync::Arc::new(
+            self.handlers
+                .iter()
+                .map(|(filter, handler)| {
+                    let bound: Box<dyn ErasedHandler<()>> = Box::new(StateBound {
+                        inner: handler.clone_box(),
+                        state: Arc::clone(&state),
+                    });
+                    (*filter, bound)
+                })
+                .collect(),
+        );
 
         MethodRouter {
             handlers,
@@ -280,14 +311,11 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
 
 impl<S: Clone + Send + Sync + 'static> Clone for MethodRouter<S> {
     fn clone(&self) -> Self {
+        // handlers live behind an Arc: no per-handler clone_box here.
         Self {
-            handlers: self
-                .handlers
-                .iter()
-                .map(|(f, h)| (*f, h.clone_box()))
-                .collect(),
+            handlers: std::sync::Arc::clone(&self.handlers),
             allow_methods: self.allow_methods,
-            layers: self.layers.clone(), // Arc — O(n) cheap clone
+            layers: self.layers.clone(), // LayerFn is Arc-backed — O(n) cheap
         }
     }
 }

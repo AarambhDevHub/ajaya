@@ -48,7 +48,10 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             max_connections: None,
-            tcp_nodelay: None,
+            // Nagle × delayed-ACK adds tens-of-ms stalls per small response;
+            // virtually every HTTP server enables NODELAY unconditionally.
+            // Opt out with .tcp_nodelay(false).
+            tcp_nodelay: Some(true),
             tcp_keepalive: None,
             tcp_keepalive_interval: None,
             tcp_keepalive_retries: None,

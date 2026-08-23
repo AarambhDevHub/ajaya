@@ -62,10 +62,8 @@ where
             .get::<PathParams>()
             .ok_or(PathRejection::MissingPathParams)?;
 
-        let pairs: Vec<(String, String)> = path_params
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        // Borrow the params: no per-key/per-value String clones here.
+        let pairs: Vec<(&str, &str)> = path_params.iter().collect();
 
         let deserializer = PathDeserializer::new(&pairs);
         let value = T::deserialize(deserializer)

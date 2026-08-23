@@ -204,6 +204,7 @@ dependencies = [
  "async-compression",
  "base64",
  "cookie",
+ "futures-util",
  "http",
  "http-body",
  "mime",

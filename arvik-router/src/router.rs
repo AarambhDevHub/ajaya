@@ -357,8 +357,11 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     pub fn layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.layers.push(into_layer_fn(layer));
@@ -379,8 +382,11 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
     pub fn route_layer<L>(mut self, layer: L) -> Self
     where
         L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-        L::Service:
-            Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        L::Service: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
         self.route_layers.push(into_layer_fn(layer));
@@ -494,12 +500,29 @@ impl Router<()> {
         let route_layers = self.route_layers;
         let outer_layers = self.layers;
 
-        // Inner core: route dispatch + route_layers
+        // Pre-fold the router-level route_layers into each entry ONCE, so the
+        // per-request path clones a ready-made service instead of deep-cloning
+        // the MethodRouter and re-wrapping every layer on every request.
+        let layered_routes: Vec<Option<BoxCloneService>> = self
+            .routes
+            .iter()
+            .map(|entry| {
+                if route_layers.is_empty() {
+                    None
+                } else {
+                    let base =
+                        BoxCloneService::new(MethodRouterService(entry.method_router.clone()));
+                    Some(apply_layers(base, &route_layers))
+                }
+            })
+            .collect();
+
+        // Inner core: route dispatch + prebuilt layered services
         let inner = Arc::new(RouterInner {
             trie: self.trie,
             routes: self.routes,
             fallback: self.fallback,
-            route_layers,
+            layered_routes,
         });
 
         // Wrap in a clone-friendly Tower service
@@ -524,7 +547,9 @@ struct RouterInner {
     trie: matchit::Router<usize>,
     routes: Vec<RouteEntry<()>>,
     fallback: Option<Box<dyn ErasedHandler<()>>>,
-    route_layers: Vec<LayerFn>,
+    /// Pre-folded `route_layer(method_router)` services, index-aligned with
+    /// `routes`; `None` when the route has no router-level layers.
+    layered_routes: Vec<Option<BoxCloneService>>,
 }
 
 impl RouterInner {
@@ -551,13 +576,11 @@ impl RouterInner {
                 }
                 req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
-                let mut response = if self.route_layers.is_empty() {
-                    entry.method_router.call(req, ()).await
-                } else {
-                    let base =
-                        BoxCloneService::new(MethodRouterService(entry.method_router.clone()));
-                    let svc = apply_layers(base, &self.route_layers);
-                    oneshot(svc, req).await
+                // Cloning the prebuilt stack is an O(1)-per-wrapper bump now
+                // that MethodRouter shares its handlers behind an Arc.
+                let mut response = match self.layered_routes[idx].as_ref() {
+                    Some(svc) => oneshot(svc.clone(), req).await,
+                    None => entry.method_router.call(req, ()).await,
                 };
                 response.extensions_mut().insert(MatchedPathExt(pattern));
                 response

@@ -204,11 +204,18 @@ where
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
 
+        let is_head = req.method() == http::Method::HEAD;
+
         Box::pin(async move {
             let response = inner.call(req).await?;
 
             // Don't compress if already encoded.
             if response.headers().contains_key(CONTENT_ENCODING) {
+                return Ok(response);
+            }
+
+            // HEAD has no body to compress; keep Content-Length semantics intact.
+            if is_head {
                 return Ok(response);
             }
 
@@ -234,31 +241,40 @@ async fn compress_response(
 ) -> Response {
     let (mut parts, body) = response.into_parts();
 
-    let body_bytes: Bytes = match body.to_bytes().await {
-        Ok(b) => b,
-        Err(_) => {
-            return http::Response::builder()
-                .status(StatusCode::INTERNAL_SERVER_ERROR)
-                .body(Body::from("Compression error"))
-                .unwrap();
-        }
-    };
-
-    // Skip compression for small bodies.
-    if body_bytes.len() < config.min_size {
+    // Skip compression when the size hint proves the body is smaller than
+    // the threshold — without buffering anything.
+    if let Some(upper) = http_body::Body::size_hint(&body).upper()
+        && upper < config.min_size as u64
+    {
         parts
             .headers
             .insert(VARY, HeaderValue::from_static("Accept-Encoding"));
-        return http::Response::from_parts(parts, Body::from_bytes(body_bytes));
+        return http::Response::from_parts(parts, body);
     }
 
-    // FIX: `compress_bytes` always returns `Vec<u8>` (either compressed or
-    // a copy of the original bytes as Vec).  Previously the fallback arm
-    // returned `body_bytes` (type `Bytes`) while the Ok arm returned
-    // `Vec<u8>`, causing a type mismatch.  Now both arms produce `Vec<u8>`.
-    let compressed: Vec<u8> = match compress_bytes(&body_bytes, encoding).await {
-        Ok(b) => b,
-        Err(_) => body_bytes.to_vec(), // FIX: .to_vec() converts Bytes → Vec<u8>
+    // Stream the body through the encoder instead of collecting it: time to
+    // first byte stays live for large responses and peak memory is one chunk
+    // rather than uncompressed+compressed copies of the whole payload.
+    let reader = tokio_util::io::StreamReader::new(body_byte_stream(body));
+    let level = match config.level {
+        CompressionLevel::Fastest => async_compression::Level::Fastest,
+        CompressionLevel::Best => async_compression::Level::Best,
+        CompressionLevel::Default => async_compression::Level::Default,
+    };
+
+    let compressed: Body = match encoding {
+        Encoding::Gzip => Body::from_stream(tokio_util::io::ReaderStream::new(
+            GzipEncoder::with_quality(reader, level),
+        )),
+        Encoding::Br => Body::from_stream(tokio_util::io::ReaderStream::new(
+            BrotliEncoder::with_quality(reader, level),
+        )),
+        Encoding::Zstd => Body::from_stream(tokio_util::io::ReaderStream::new(
+            ZstdEncoder::with_quality(reader, level),
+        )),
+        Encoding::Deflate => Body::from_stream(tokio_util::io::ReaderStream::new(
+            DeflateEncoder::with_quality(reader, level),
+        )),
     };
 
     parts.headers.insert(
@@ -268,43 +284,38 @@ async fn compress_response(
     parts
         .headers
         .insert(VARY, HeaderValue::from_static("Accept-Encoding"));
-    // Remove Content-Length since compressed size differs.
+    // Compressed length is not known up front while streaming — hyper will
+    // use chunked transfer encoding.
     parts.headers.remove(CONTENT_LENGTH);
 
-    let final_body = Body::from_bytes(Bytes::from(compressed));
-    http::Response::from_parts(parts, final_body)
+    http::Response::from_parts(parts, compressed)
 }
 
-/// Compress `data` using the given encoding. Returns `Vec<u8>`.
-async fn compress_bytes(data: &[u8], encoding: Encoding) -> std::io::Result<Vec<u8>> {
-    // `std::io::Cursor<&[u8]>` is `Unpin` and satisfies `AsyncRead`.
-    let cursor = std::io::Cursor::new(data);
-    match encoding {
-        Encoding::Gzip => {
-            let mut enc = GzipEncoder::new(cursor);
-            let mut out = Vec::new();
-            enc.read_to_end(&mut out).await?;
-            Ok(out)
-        }
-        Encoding::Br => {
-            let mut enc = BrotliEncoder::new(cursor);
-            let mut out = Vec::new();
-            enc.read_to_end(&mut out).await?;
-            Ok(out)
-        }
-        Encoding::Zstd => {
-            let mut enc = ZstdEncoder::new(cursor);
-            let mut out = Vec::new();
-            enc.read_to_end(&mut out).await?;
-            Ok(out)
-        }
-        Encoding::Deflate => {
-            let mut enc = DeflateEncoder::new(cursor);
-            let mut out = Vec::new();
-            enc.read_to_end(&mut out).await?;
-            Ok(out)
-        }
-    }
+/// Adapt an HTTP body into a plain byte stream for `StreamReader`.
+///
+/// Trailer frames terminate the data stream; stream errors surface as
+/// `io::Error` mid-stream (the connection is aborted by hyper at that point).
+type ByteStream =
+    futures_util::stream::BoxStream<'static, std::io::Result<tokio_util::bytes::Bytes>>;
+
+fn body_byte_stream(body: Body) -> ByteStream {
+    use futures_util::StreamExt as _;
+
+    let mut body = Box::pin(body);
+    futures_util::stream::poll_fn(
+        move |cx| match http_body::Body::poll_frame(body.as_mut(), cx) {
+            std::task::Poll::Ready(Some(Ok(frame))) => match frame.into_data() {
+                Ok(data) => std::task::Poll::Ready(Some(Ok(data))),
+                Err(_trailer) => std::task::Poll::Ready(None),
+            },
+            std::task::Poll::Ready(Some(Err(err))) => {
+                std::task::Poll::Ready(Some(Err(std::io::Error::other(err.to_string()))))
+            }
+            std::task::Poll::Ready(None) => std::task::Poll::Ready(None),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        },
+    )
+    .boxed()
 }
 
 fn should_compress(headers: &http::HeaderMap) -> bool {
@@ -482,6 +493,97 @@ mod tests {
         let mut out = Vec::new();
         tokio::io::copy(&mut encoder, &mut out).await.unwrap();
         Bytes::from(out)
+    }
+
+    /// Inner service returning a fixed body larger than `min_size`.
+    #[derive(Clone)]
+    struct FixedBodyService {
+        body: String,
+    }
+
+    impl Service<Request> for FixedBodyService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, _: Request) -> Self::Future {
+            let body = self.body.clone();
+            Box::pin(async move {
+                Ok(http::Response::builder()
+                    .status(StatusCode::OK)
+                    .header(http::header::CONTENT_TYPE, "text/plain")
+                    .body(Body::from(body))
+                    .unwrap())
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn large_responses_are_streamed_compressed() {
+        // Larger than the default min_size so compression applies.
+        let payload = "arvik-streaming-compression-".repeat(200);
+
+        let mut svc = CompressionLayer::new()
+            .gzip(true)
+            .br(false)
+            .zstd(false)
+            .deflate(false)
+            .layer(FixedBodyService {
+                body: payload.clone(),
+            });
+
+        let res = svc
+            .call(Request::new(
+                http::Request::builder()
+                    .method(http::Method::GET)
+                    .uri("/")
+                    .header(ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            res.headers()
+                .get(CONTENT_ENCODING)
+                .and_then(|v| v.to_str().ok()),
+            Some("gzip")
+        );
+        // Streaming: no Content-Length up front.
+        assert!(res.headers().get(CONTENT_LENGTH).is_none());
+
+        // The streamed body must decode back to the original payload.
+        let raw = res.into_body().to_bytes().await.unwrap();
+        let mut decoder = GzipDecoder::new(std::io::Cursor::new(raw.as_ref()));
+        let mut decoded = Vec::new();
+        decoder.read_to_end(&mut decoded).await.unwrap();
+        assert_eq!(decoded, payload.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn head_responses_skip_compression() {
+        let mut svc = CompressionLayer::new().layer(FixedBodyService {
+            body: "y".repeat(4096),
+        });
+
+        let res = svc
+            .call(Request::new(
+                http::Request::builder()
+                    .method(http::Method::HEAD)
+                    .uri("/")
+                    .header(ACCEPT_ENCODING, "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        assert!(res.headers().get(CONTENT_ENCODING).is_none());
     }
 
     #[tokio::test]

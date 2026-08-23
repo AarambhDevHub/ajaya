@@ -43,7 +43,7 @@ pub type LayerFn = Arc<dyn Fn(BoxCloneService) -> BoxCloneService + Send + Sync 
 // ── BoxCloneService ─────────────────────────────────────────────────────────
 
 /// Object-safe inner trait.
-trait ErasedSvc: Send {
+trait ErasedSvc: Send + Sync {
     fn call_erased(
         &mut self,
         req: Request,
@@ -56,7 +56,7 @@ trait ErasedSvc: Send {
 
 impl<S> ErasedSvc for S
 where
-    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
     S::Future: Send + 'static,
 {
     fn call_erased(
@@ -79,7 +79,11 @@ impl BoxCloneService {
     /// Wrap a concrete service in a `BoxCloneService`.
     pub fn new<S>(svc: S) -> Self
     where
-        S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+        S: Service<Request, Response = Response, Error = Infallible>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
         S::Future: Send + 'static,
     {
         Self(Box::new(svc))
@@ -122,12 +126,13 @@ impl std::fmt::Debug for BoxCloneService {
 ///
 /// The resulting service `L::Service` must be:
 /// - `Service<Request, Response = Response, Error = Infallible>`
-/// - `Clone + Send + 'static`
+/// - `Clone + Send + Sync + 'static`
 /// - Its future must be `Send + 'static`
 pub fn into_layer_fn<L>(layer: L) -> LayerFn
 where
     L: Layer<BoxCloneService> + Clone + Send + Sync + 'static,
-    L::Service: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
+    L::Service:
+        Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
     <L::Service as Service<Request>>::Future: Send + 'static,
 {
     Arc::new(move |svc: BoxCloneService| -> BoxCloneService {

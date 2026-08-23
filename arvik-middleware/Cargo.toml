@@ -21,6 +21,7 @@ tokio-util        = { workspace = true }
 tokio             = { workspace = true }
 mime              = { workspace = true }
 uuid = { workspace = true }
+futures-util = { workspace = true }
 parking_lot = { workspace = true }
 base64 = { workspace = true }
 cookie = { workspace = true }
