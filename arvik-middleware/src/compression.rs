@@ -422,8 +422,14 @@ where
 
             let new_body = match decompressed {
                 Some(data) => {
-                    // Remove Content-Encoding since the body is now decoded.
+                    // The body is now decoded: drop Content-Encoding and fix
+                    // Content-Length, which still described the compressed
+                    // wire size and would defeat downstream size checks.
                     parts.headers_mut().remove(CONTENT_ENCODING);
+                    parts.headers_mut().insert(
+                        CONTENT_LENGTH,
+                        HeaderValue::from_str(&data.len().to_string()).expect("valid CL"),
+                    );
                     Body::from_bytes(Bytes::from(data))
                 }
                 None => Body::from_bytes(body_bytes), // pass through as-is
@@ -432,5 +438,78 @@ where
             let req = Request::from_request_parts(parts, new_body);
             inner.call(req).await
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Inner service that reports the Content-Length header it received and
+    /// the actual body length, so the test can compare them.
+    #[derive(Clone)]
+    struct ReportService;
+
+    impl Service<Request> for ReportService {
+        type Response = Response;
+        type Error = Infallible;
+        type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: Request) -> Self::Future {
+            Box::pin(async move {
+                let cl = req
+                    .headers()
+                    .get(CONTENT_LENGTH)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("absent")
+                    .to_string();
+                let body = Body::to_string(req.into_body()).await.unwrap_or_default();
+                let report = format!("cl={cl}|len={}", body.len());
+                Ok(http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from(report))
+                    .unwrap())
+            })
+        }
+    }
+
+    async fn gzip_compress(data: &[u8]) -> Bytes {
+        let mut encoder = GzipEncoder::new(std::io::Cursor::new(data));
+        let mut out = Vec::new();
+        tokio::io::copy(&mut encoder, &mut out).await.unwrap();
+        Bytes::from(out)
+    }
+
+    #[tokio::test]
+    async fn decompression_fixes_content_length_to_decoded_size() {
+        let original = b"hello world, this payload is much larger once decompressed!";
+        let compressed = gzip_compress(original).await;
+        assert!(compressed.len() != original.len());
+
+        let mut svc = DecompressionLayer::new().layer(ReportService);
+        let res = svc
+            .call(Request::new(
+                http::Request::builder()
+                    .method(http::Method::POST)
+                    .uri("/")
+                    .header(CONTENT_ENCODING, "gzip")
+                    .header(CONTENT_LENGTH, http::HeaderValue::from(compressed.len()))
+                    .body(Body::from_bytes(compressed))
+                    .unwrap(),
+            ))
+            .await
+            .unwrap();
+
+        let text = Body::to_string(res.into_body()).await.unwrap();
+        // The stale compressed length must not survive; both views of size
+        // must agree on the decoded payload.
+        assert_eq!(
+            text,
+            format!("cl={}|len={}", original.len(), original.len())
+        );
     }
 }
