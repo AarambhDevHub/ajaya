@@ -236,13 +236,14 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// (e.g. `PURGE`) unless the route registered [`MethodFilter::EXTENSION`]
     /// or [`MethodFilter::ANY`].
     pub async fn call(&self, req: Request, state: S) -> Response {
-        let method = req.method().clone();
-        let method_filter = MethodFilter::from_method(&method);
+        // Borrowed — no Method clone per request.
+        let method = req.method();
+        let method_filter = MethodFilter::from_method(method);
 
         // RFC 9110 §9.3.2: a HEAD response is a GET response without a body,
         // so fall back to the GET handler unless HEAD was explicitly bound.
         let head_falls_back_to_get =
-            method == http::Method::HEAD && !self.allow_methods.contains(MethodFilter::HEAD);
+            *method == http::Method::HEAD && !self.allow_methods.contains(MethodFilter::HEAD);
 
         // Baked per-handler layer stacks exist once the state is bound
         // (`with_state`): fold every layer exactly once instead of rebuilding
@@ -295,7 +296,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         ResponseBuilder::new()
             .status(StatusCode::METHOD_NOT_ALLOWED)
             .header(http::header::ALLOW, allow)
-            .text("Method Not Allowed")
+            .text_static("Method Not Allowed")
     }
 
     /// Append already-erased layers to this router's per-route stack.
