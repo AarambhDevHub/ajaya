@@ -231,12 +231,12 @@ pub struct SetRequestHeaderService<S> {
 
 impl<S> Service<Request> for SetRequestHeaderService<S>
 where
-    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
-    S::Future: Send + 'static,
+    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
+    S::Future: Send + Unpin + 'static,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -260,7 +260,7 @@ where
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
-        Box::pin(async move { inner.call(req).await })
+        inner.call(req)
     }
 }
 
@@ -319,12 +319,12 @@ pub struct SensitiveHeadersService<S> {
 
 impl<S> Service<Request> for SensitiveHeadersService<S>
 where
-    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
-    S::Future: Send + 'static,
+    S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + Sync + 'static,
+    S::Future: Send + Unpin + 'static,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -336,7 +336,7 @@ where
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
-        Box::pin(async move { inner.call(req).await })
+        inner.call(req)
     }
 }
 

@@ -20,7 +20,6 @@
 //! ```
 
 use std::convert::Infallible;
-use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -66,11 +65,11 @@ pub struct RequestBodyLimitService<S> {
 impl<S> Service<Request> for RequestBodyLimitService<S>
 where
     S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
-    S::Future: Send + 'static,
+    S::Future: Send + Unpin + 'static,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future = RequestBodyLimitFuture<S>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -79,42 +78,67 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let limit = self.limit;
 
+        // Fast-path: reject based on Content-Length immediately. Only this
+        // rare rejection path pays an allocation — the accepted path returns
+        // the inner future directly with no extra boxing.
+        if let Some(content_length) = req
+            .headers()
+            .get(http::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<usize>().ok())
+        {
+            if content_length > limit {
+                tracing::warn!(
+                    content_length = content_length,
+                    limit = limit,
+                    "Request body exceeds size limit (Content-Length check)"
+                );
+                return RequestBodyLimitFuture::Reject(std::future::ready(Ok(payload_too_large(
+                    limit,
+                ))));
+            }
+        }
+
+        // For streaming bodies: pass the body through unbuffered with a
+        // counting cap — readers get an error once the limit is crossed.
+        let (parts, body) = req.into_request_parts();
+        let limited = Body::new(LimitedBody {
+            inner: body,
+            limit: limit as u64,
+            read: 0,
+        });
+        let req = Request::from_request_parts(parts, limited);
+
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
-
-        Box::pin(async move {
-            // Fast-path: reject based on Content-Length header immediately.
-            if let Some(content_length) = req
-                .headers()
-                .get(http::header::CONTENT_LENGTH)
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.parse::<usize>().ok())
-            {
-                if content_length > limit {
-                    tracing::warn!(
-                        content_length = content_length,
-                        limit = limit,
-                        "Request body exceeds size limit (Content-Length check)"
-                    );
-                    return Ok::<Response, Infallible>(payload_too_large(limit));
-                }
-            }
-
-            // For streaming bodies: pass the body through unbuffered with a
-            // counting cap — readers get an error once the limit is crossed.
-            let (parts, body) = req.into_request_parts();
-            let limited = Body::new(LimitedBody {
-                inner: body,
-                limit: limit as u64,
-                read: 0,
-            });
-            let req = Request::from_request_parts(parts, limited);
-            inner.call(req).await
-        })
+        RequestBodyLimitFuture::Accept(inner.call(req))
     }
 }
 
-/// Streaming frame filter that errors once more than `limit` bytes have been
+/// Happy path delegates to the inner service's own (unboxed) future; only
+/// the rare over-limit rejection uses a tiny ready future.
+pub enum RequestBodyLimitFuture<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible>,
+{
+    Accept(S::Future),
+    Reject(std::future::Ready<Result<Response, Infallible>>),
+}
+
+impl<S> std::future::Future for crate::body_limit::RequestBodyLimitFuture<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible>,
+    S::Future: Send + Unpin + 'static,
+{
+    type Output = Result<Response, Infallible>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match &mut *self {
+            Self::Accept(fut) => std::pin::Pin::new(fut).poll(cx),
+            Self::Reject(fut) => std::pin::Pin::new(fut).poll(cx),
+        }
+    }
+}
 /// read. Frames themselves are passed through untouched — nothing is buffered.
 struct LimitedBody {
     inner: Body,
@@ -235,18 +259,15 @@ where
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
     }
 
     fn call(&mut self, mut req: Request) -> Self::Future {
-        let cloned = self.inner.clone();
-        let mut inner = std::mem::replace(&mut self.inner, cloned);
-
         req.extensions_mut().insert(DefaultBodyLimit(self.limit));
-        Box::pin(inner.call(req))
+        self.inner.call(req)
     }
 }
 
