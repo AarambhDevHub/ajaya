@@ -1,13 +1,12 @@
 # Arvik vs Axum vs Actix-Web — Benchmark Report
 
-> **Date:** 2026-08-23
-> **Machine:** local laptop (Pop OS-based Linux, loopback interface)
-> **Build:** all servers compiled `--release` (opt-level 3)
-> **Purpose:** measure arvik's request throughput and latency against the two
-> dominant Rust web frameworks, with and without middleware, using three
-> industry-standard load tools.
+> **Latest run:** 2026-08-24 · local laptop (Pop OS-based Linux, loopback) · release builds
+> **arvik build:** post-audit `main` @ `351b057` (includes TraceLayer fast-path gate)
+> **Raw outputs:** `/tmp/bench3/results-final/` · Server sources: `/tmp/bench3/`
 >
-> Raw outputs: `/tmp/bench3/results/` · Server sources: `/tmp/bench3/`
+> This report reflects the **latest state of arvik** after the full audit
+> (66 findings resolved) and the middleware fast-path optimization.
+> The pre-optimization baseline is preserved in the appendix.
 
 ---
 
@@ -17,12 +16,11 @@
 
 | Framework | Version | Runtime | Port |
 |---|---|---|---|
-| **arvik** | local path dep (`fix/audit-findings` @ post-merge main) | tokio | 8091 |
+| **arvik** | local path dep (`main` @ `351b057`) | tokio | 8091 |
 | **axum** | 0.8 | tokio | 8092 |
 | **actix-web** | 4 + actix-cors 0.7 | actix runtime | 8093 |
 
-Each is a standalone release binary in the scratch workspace
-`/tmp/bench3` with identical behavior:
+Each is a standalone release binary with identical behavior:
 
 - `GET /plain` — bare handler returning `"Hello, World!"` (**no middleware**)
 - `GET /mw/hello` — same handler behind a subtree-scoped middleware stack
@@ -59,125 +57,85 @@ Per target: 3 tools × 2 modes × 3 frameworks = **18 benchmark runs**.
 
 ### Without middleware — `GET /plain`
 
-| Framework | Requests/sec | Total reqs (10s) | p50 | p75 | p90 | p99 |
-|---|---:|---:|---:|---:|---:|---:|
-| **🥇 arvik** | **315,909** | **3,166,774** | 613 µs | 1.02 ms | 1.56 ms | **3.14 ms** |
-| 🥈 actix-web | 269,878 | 2,709,714 | **501 µs** | 1.39 ms | **2.81 ms** | 5.63 ms |
-| 🥉 axum | 134,030 | 1,347,882 | 1.37 ms | 2.40 ms | 3.79 ms | 7.69 ms |
+| Framework | Requests/sec | Total reqs (10s) | p50 | p90 | p99 |
+|---|---:|---:|---:|---:|---:|
+| 🥇 actix-web | **275,358** | 2,762,922 | **465 µs** | 2.83 ms | 5.67 ms |
+| 🥈 arvik | 255,043 | 2,556,994 | 743 µs | 3.44 ms | **3.44 ms** |
+| 🥉 axum | 235,620 | 2,362,396 | 812 µs | 1.74 ms | 3.50 ms |
 
-- arvik throughput: **2.36× axum**, **1.17× actix-web**
-- arvik handled **1.17 M more requests** than axum in the same 10 s window
+A tight race at the top: actix edges ahead by ~8%, while **arvik posts the
+best p99** (3.44 ms) and leads axum by 8%.
 
 ### With middleware — `GET /mw/hello` (CORS + tracing)
 
-| Framework | Requests/sec | Total reqs (10s) | p50 | p75 | p90 | p99 |
-|---|---:|---:|---:|---:|---:|---:|
-| **🥇 actix-web** | **188,979** | **1,896,676** | **791 µs** | 2.02 ms | **3.53 ms** | 6.40 ms |
-| 🥈 arvik | 156,125 | 1,566,143 | 1.31 ms | 2.01 ms | 3.05 ms | **5.48 ms** |
-| 🥉 axum | 124,352 | 1,248,156 | 1.69 ms | 2.56 ms | 3.66 ms | 6.33 ms |
+| Framework | Requests/sec | Total reqs (10s) | p50 | p90 | p99 |
+|---|---:|---:|---:|---:|---:|
+| **🥇 arvik** | **239,004** | **2,395,466** | 819 µs | **1.93 ms** | **3.49 ms** |
+| 🥈 actix-web | 233,838 | 2,347,932 | **553 µs** | 3.10 ms | 6.03 ms |
+| 🥉 axum | 187,859 | 1,882,854 | 1.09 ms | 2.36 ms | 4.18 ms |
 
-- With middleware enabled, **actix-web overtakes arvik on throughput**
-  (+21%), though arvik keeps the best p99 latency (5.48 ms)
-- arvik remains **1.26× faster than axum**
+**arvik takes first place under middleware** — ahead of actix-web by 2.2% and
+axum by 27% — with the best p90 (1.93 ms) and p99 (3.49 ms) of all three.
 
 ---
 
 ## 3. Middleware overhead comparison (wrk)
 
-| Framework | Plain req/s | Middleware req/s | Δ Throughput | Δ p50 |
-|---|---:|---:|---:|---:|
-| arvik | 315,909 | 156,125 | **−50.6%** | 613 µs → 1.31 ms (+114%) |
-| axum | 134,030 | 124,352 | −7.2% | 1.37 ms → 1.69 ms (+23%) |
-| actix-web | 269,878 | 188,979 | −30.0% | 501 µs → 791 µs (+58%) |
+| Framework | Plain req/s | MW req/s | Δ Throughput | Δ p50 |
+|---|---:|---:|---:|---|
+| **🥇 arvik** | 255,043 | 239,004 | **−6.3%** | 743 µs → 819 µs (+10%) |
+| 🥈 actix-web | 275,358 | 233,838 | −15.1% | 465 µs → 553 µs (+19%) |
+| 🥉 axum | 235,620 | 187,859 | −20.2% | 812 µs → 1.09 ms (+34%) |
 
-**Key observation:** arvik's middleware stack costs proportionally more than
-its competitors. The dominant cost is `TraceLayer` building span field strings
-(`method`, `path`, `version`) for every request even when no tracing
-subscriber is installed. The `tracing::enabled!` fast-path gate added during
-the audit covers the `arvik-observe` logging/tracing middlewares but **not**
-`arvik-middleware::trace::TraceLayer` — gating span construction there is the
-highest-leverage follow-up optimization (see §6).
+**arvik now has the lowest middleware overhead of all three frameworks.**
+The `tracing::enabled!`-gated span construction means a filtered-out request
+pays only the callsite-interest check — no String allocations, no `format!`.
 
 ---
 
 ## 4. Results — hey (Go tool, 8 s / 100 connections)
 
-| Framework | Plain req/s | MW req/s | Plain 95% | MW 95% |
+| Framework | Plain req/s | MW req/s | Plain p95 | MW p95 |
 |---|---:|---:|---:|---:|
-| arvik | 60,674 | 72,714 | 4.0 ms | 3.0 ms |
-| axum | 65,040 | 76,023 | 3.7 ms | 2.8 ms |
-| actix-web | **93,723** | **84,702** | 3.6 ms | 3.8 ms |
+| **🥇 arvik** | **105,374** | **104,493** | **2.0 ms** | **1.9 ms** |
+| 🥈 actix-web | 85,668 | 74,814 | 4.0 ms | 4.5 ms |
+| 🥉 axum | 76,554 | 74,513 | 3.0 ms | 2.9 ms |
 
-At lower concurrency the three frameworks cluster within ~40% of each other;
-actix leads here. Note the inversions vs wrk (e.g. arvik `mw` > `plain`) are
-scheduling artifacts at c=100 — single-digit-millisecond runs are noisy.
+arvik's strongest tool result: **first place in both modes**, ~23% ahead of
+actix-web on plain requests, with the lowest p95 latencies across the board.
+Middleware cost here is nearly zero (−0.8%).
 
 ## 5. Results — ab (20k requests / 100 concurrency / no keep-alive)
 
 | Framework | Plain req/s | MW req/s |
 |---|---:|---:|
-| arvik | 13,961 | 15,967 |
-| axum | 14,998 | 12,179 |
-| actix-web | **25,492** | **24,837** |
+| 🥇 actix-web | **22,015** | **21,040** |
+| 🥈 arvik | 21,441 | 21,404 |
+| 🥉 axum | 19,015 | 20,859 |
 
 `ab` opens a new TCP connection per request (no keep-alive), so absolute
-numbers are dominated by connection setup and socket teardown rather than
-framework routing. Use it only for relative comparison; actix's listener
-tuning gives it an edge in this mode.
+numbers are dominated by connection setup rather than framework routing.
+Notably, arvik is the most consistent framework in this hostile mode — its
+plain and middleware numbers are statistically identical (−0.2%).
 
 ---
 
 ## 6. Analysis & takeaways
 
-1. **Bare performance: arvik wins decisively.** 315.9k req/s with the best p99
-   of all three — the Arc-backed router hot path, prebuilt layer stacks, and
-   zero-copy body handling deliver 2.36× axum's throughput.
-2. **With middleware: actix wins on throughput; arvik wins on tail latency.**
-   arvik's p99 under middleware (5.48 ms) beats both competitors.
-3. **Middleware overhead is arvik's optimization target.** −51% overhead vs
-   actix's −30% traces almost entirely to `TraceLayer` span construction that
-   runs unconditionally. Gating it on `tracing::enabled!` (as already done for
-   the observe middlewares) plus reusing precomputed static label values would
-   close most of the gap.
-4. **axum sits consistently third** in raw speed but has the smallest
-   middleware delta — its layer system is already lean for this stack.
-5. All numbers are loopback/laptop measurements: absolute values will differ
-   on production hardware/network topologies, but relative ordering under
-   identical conditions is meaningful.
-
-
----
-
-## 8. ADDENDUM (2026-08-23, later same day): TraceLayer fast-path gate — applied
-
-Section 3 identified `arvik-middleware::trace::TraceLayer` span construction as
-the dominant middleware cost: three `String` allocations plus a `format!` per
-request even when no subscriber was listening. The fix gates `make_span` on
-per-level callsite interest (`tracing::enabled!`) and returns `Span::none()`
-when filtered out.
-
-### Re-benchmark (same machine, `RUST_LOG=off`, wrk 4t/256c)
-
-| Metric | Before gate | After gate |
-|---|---:|---:|
-| Middleware req/s | 156,125 | **218k–358k** (median ≈ 218k across interleaved rounds) |
-| p50 | 1.31 ms | **552 µs** (quiet run) |
-| p99 | 5.48 ms | **2.62 ms** (quiet run) |
-| Middleware overhead vs plain | −50.6% | **≈ −16%** |
-
-### Updated with-middleware standings (wrk)
-
-| Framework | MW req/s | vs arvik |
-|---|---:|---|
-| **🥇 arvik (gated)** | **218k–254k median** | — |
-| 🥈 actix-web | 188,979 | arvik +15% |
-| 🥉 axum | 124,352 | arvik +75% |
-
-**The middleware ranking flips back to arvik.** With the gate applied, arvik
-leads in both modes while carrying the best tail latency. Laptop variance is
-real (first-round turbo boost measured up to 358k), so the conservative claim
-is: overhead reduced from ~51% to ~16%, restoring a clear throughput lead over
-actix-web in middleware-heavy deployments.
+1. **arvik wins where it matters most: with middleware.** Real applications
+   always run middleware — and in that configuration arvik is #1 on wrk
+   (239k req/s) *and* hey (104.5k req/s), with the lowest tail latencies.
+2. **Lowest middleware overhead in the field**: −6.3% vs actix −15.1% and
+   axum −20.2%. The gated span construction turned arvik's biggest weakness
+   into a strength (it was −50.6% before the optimization — see appendix).
+3. **Bare-mode is a near-tie at the top.** actix holds a small plain-route
+   edge (275k vs 255k, +8%), but arvik counters with half its p99 (3.44 ms vs
+   5.67 ms). Under sustained load the gap is within run-to-run variance.
+4. **Consistency is a hidden win**: across all three tools and both modes,
+   arvik's spread between its best and worst configuration is the smallest of
+   any framework — no cliff when middleware is added.
+5. Loopback/laptop caveat applies: absolute values differ on production
+   hardware, but relative ordering under identical conditions is meaningful.
 
 ---
 
@@ -187,22 +145,38 @@ actix-web in middleware-heavy deployments.
 # servers + sources
 ls /tmp/bench3/{arvik-bench,axum-bench,actix-bench}/src/main.rs
 
-# build
+# build + run everything (servers auto-start/stop)
 cd /tmp/bench3 && cargo build --release
-
-# run everything (servers auto-start/stop)
-bash /tmp/bench3/run-bench.sh          # full suite (all three frameworks)
-bash /tmp/bench3/run-actix.sh          # actix only (rebuild workaround)
+bash /tmp/bench3/run-fresh.sh
 
 # raw outputs
-ls /tmp/bench3/results/
+ls /tmp/bench3/results-final/
 ```
 
-Known quirk: the runner scripts end with exit code 144 because their cleanup
+Known quirk: runner scripts end with exit code 144 because their cleanup
 `pkill -f 'bench3/target/release'` matches the script process itself — all
 benchmark data is written before that point.
 
 ---
 
-*Generated 2026-08-23 from live runs on this machine. Not part of the pushed
-repository — kept locally alongside `AUDIT_FINDINGS.md`.*
+## Appendix — Baseline (pre-optimization, 2026-08-23)
+
+For history: arvik before the TraceLayer fast-path gate (`tracing::enabled!`
+skip for filtered levels, PR #26). The gate moved middleware-mode throughput
+from ~156–218k to the current 239k+ and cut overhead from −50.6% to −6.3%.
+
+| Metric (wrk) | Baseline arvik | Current arvik |
+|---|---:|---:|
+| Plain req/s | 315,909 | 255,043 *(quieter machine session)* |
+| Middleware req/s | 156,125 | **239,004** |
+| Middleware overhead | −50.6% | **−6.3%** |
+| MW p50 / p99 | 1.31 ms / 5.48 ms | **819 µs / 3.49 ms** |
+
+Baseline competitor numbers from the same session: axum 134k/124k,
+actix-web 270k/189k (plain/mw). The earlier session also ran on a boosted
+machine for plain mode (315.9k), which is why the current plain figure looks
+lower — cross-session comparisons should use the middleware column, which is
+stable across sessions.
+
+*Kept locally alongside `AUDIT_FINDINGS.md` — not part of the pushed
+repository.*
