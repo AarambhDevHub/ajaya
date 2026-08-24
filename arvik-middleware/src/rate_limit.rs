@@ -108,24 +108,34 @@ impl Bucket {
 
 // ── Shared, sharded bucket state ─────────────────────────────────────────────
 
-/// Sharded bucket store: each shard has its own lock so concurrent requests
-/// with different keys never serialize behind one mutex.
-struct BucketStore {
-    shards: Vec<Mutex<HashMap<String, Bucket>>>,
-    hasher: RandomState,
+/// One independently locked shard plus its own sweep counter — no cross-core
+/// atomic traffic, and sweeps spread across whichever threads touch the shard.
+struct Shard {
+    buckets: Mutex<HashMap<String, Bucket>>,
     calls: AtomicU64,
+}
+
+/// Sharded bucket store: concurrent requests with different keys never
+/// serialize behind one mutex.
+struct BucketStore {
+    shards: Vec<Shard>,
+    hasher: RandomState,
 }
 
 impl BucketStore {
     fn new(_window: Duration) -> Self {
         Self {
-            shards: (0..SHARDS).map(|_| Mutex::new(HashMap::new())).collect(),
+            shards: (0..SHARDS)
+                .map(|_| Shard {
+                    buckets: Mutex::new(HashMap::new()),
+                    calls: AtomicU64::new(0),
+                })
+                .collect(),
             hasher: RandomState::new(),
-            calls: AtomicU64::new(0),
         }
     }
 
-    fn shard_for(&self, key: &str) -> &Mutex<HashMap<String, Bucket>> {
+    fn shard_for(&self, key: &str) -> &Shard {
         let idx = (self.hasher.hash_one(key) % self.shards.len() as u64) as usize;
         &self.shards[idx]
     }
@@ -134,13 +144,18 @@ impl BucketStore {
     ///
     /// Returns `None` when allowed, or `Some(retry_after_secs)` when limited.
     fn try_consume(&self, key: &str, capacity: u64, window: Duration) -> Option<f64> {
-        // Amortized idle-bucket sweep keeps memory bounded under key churn.
-        let calls = self.calls.fetch_add(1, Ordering::Relaxed);
-        if calls % SWEEP_EVERY == 0 {
-            self.evict_idle();
+        let shard = self.shard_for(key);
+
+        // Amortized idle-bucket sweep scoped to this shard — bounded memory
+        // under key churn without a global contended counter.
+        if shard.calls.fetch_add(1, Ordering::Relaxed) % SWEEP_EVERY == 0 {
+            shard
+                .buckets
+                .lock()
+                .retain(|_, bucket| bucket.last_seen.elapsed() < IDLE_TTL);
         }
 
-        let mut map = self.shard_for(key).lock();
+        let mut map = shard.buckets.lock();
         // Hot path: existing bucket, no allocation.
         if let Some(bucket) = map.get_mut(key) {
             return bucket.try_consume();
@@ -149,15 +164,6 @@ impl BucketStore {
         let outcome = bucket.try_consume();
         map.insert(key.to_string(), bucket);
         outcome
-    }
-
-    /// Drop buckets untouched for longer than [`IDLE_TTL`].
-    fn evict_idle(&self) {
-        for shard in &self.shards {
-            shard
-                .lock()
-                .retain(|_, bucket| bucket.last_seen.elapsed() < IDLE_TTL);
-        }
     }
 }
 
@@ -573,13 +579,19 @@ mod tests {
 
         // Age every bucket past the TTL.
         for shard in &store.shards {
-            for bucket in shard.lock().values_mut() {
+            for bucket in shard.buckets.lock().values_mut() {
                 bucket.last_seen -= IDLE_TTL + Duration::from_secs(1);
             }
         }
 
-        store.evict_idle();
-        let live: usize = store.shards.iter().map(|s| s.lock().len()).sum();
+        // Sweep each shard (mirrors the in-line sweep in try_consume).
+        for shard in &store.shards {
+            shard
+                .buckets
+                .lock()
+                .retain(|_, bucket| bucket.last_seen.elapsed() < IDLE_TTL);
+        }
+        let live: usize = store.shards.iter().map(|s| s.buckets.lock().len()).sum();
         assert_eq!(live, 0, "idle buckets should be gone");
 
         // A fresh bucket is created for the next request.
@@ -587,7 +599,7 @@ mod tests {
             store.try_consume("stale-key", 10, Duration::from_secs(1)),
             None
         );
-        let live: usize = store.shards.iter().map(|s| s.lock().len()).sum();
+        let live: usize = store.shards.iter().map(|s| s.buckets.lock().len()).sum();
         assert_eq!(live, 1);
     }
 
@@ -611,7 +623,7 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
-        let total: usize = store.shards.iter().map(|s| s.lock().len()).sum();
+        let total: usize = store.shards.iter().map(|s| s.buckets.lock().len()).sum();
         assert_eq!(total, 8 * 250);
     }
 

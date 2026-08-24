@@ -129,13 +129,8 @@ fn strip_uri_prefix(uri: &Uri, prefix: &str) -> Option<Uri> {
     {
         "/"
     } else {
-        match path
-            .strip_prefix(prefix)
-            .filter(|rest| rest.starts_with('/'))
-        {
-            Some(rest) => rest,
-            None => return None,
-        }
+        path.strip_prefix(prefix)
+            .filter(|rest| rest.starts_with('/'))?
     };
 
     let mut path_and_query = stripped_path.to_string();

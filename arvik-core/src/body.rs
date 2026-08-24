@@ -140,7 +140,10 @@ impl Body {
             }
         }
 
-        let mut buf = bytes::BytesMut::new();
+        // Collect frame handles first (no copying); typical requests arrive
+        // as a single hyper frame, which is returned zero-copy.
+        let mut frames: Vec<Bytes> = Vec::new();
+        let mut total = 0usize;
         let mut body = self;
         while let Some(frame) = BodyExt::frame(&mut body).await {
             let data = frame?.into_data().map_err(|_| {
@@ -149,12 +152,24 @@ impl Body {
                     "unexpected body trailer",
                 )) as BoxError
             })?;
-            if buf.len() + data.len() > limit {
+            total += data.len();
+            if total > limit {
                 return Err(BodyLimitError::TooLarge);
             }
-            buf.extend_from_slice(&data);
+            frames.push(data);
         }
-        Ok(buf.freeze())
+
+        match frames.len() {
+            0 => Ok(Bytes::new()),
+            1 => Ok(frames.pop().unwrap_or_default()),
+            _ => {
+                let mut buf = bytes::BytesMut::with_capacity(total);
+                for frame in frames {
+                    buf.extend_from_slice(&frame);
+                }
+                Ok(buf.freeze())
+            }
+        }
     }
 
     /// Collect the entire body into a UTF-8 [`String`].

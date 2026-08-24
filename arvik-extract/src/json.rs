@@ -101,15 +101,21 @@ fn json_content_type(headers: &http::HeaderMap) -> bool {
         Err(_) => return false,
     };
 
-    let mime: mime::Mime = match content_type.parse() {
-        Ok(m) => m,
-        Err(_) => return false,
-    };
+    // Fast path for the exact constant — avoids a full Mime parse per request.
+    if content_type.eq_ignore_ascii_case("application/json") {
+        return true;
+    }
 
-    // Accept application/json and application/*+json (e.g., application/vnd.api+json)
-    mime.type_() == mime::APPLICATION
-        && (mime.subtype() == mime::JSON
-            || mime.suffix().is_some_and(|suffix| suffix == mime::JSON))
+    // Parameterized / suffixed variants (e.g. application/vnd.api+json,
+    // application/json;charset=utf-8) need a real parse.
+    match content_type.parse::<mime::Mime>() {
+        Ok(mime) => {
+            mime.type_() == mime::APPLICATION
+                && (mime.subtype() == mime::JSON
+                    || mime.suffix().is_some_and(|suffix| suffix == mime::JSON))
+        }
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]

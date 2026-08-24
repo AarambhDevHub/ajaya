@@ -276,8 +276,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
                 }
                 if self.layers.is_empty() {
                     // ── Fast path: no per-route layers ──────────────────────
-                    let h = handler.clone_box();
-                    return h.call(req, state).await;
+                    return handler.call(req, state).await;
                 } else {
                     // ── Layered path (unbound generic router; rare) ─────────
                     let h = handler.clone_box();
@@ -427,7 +426,11 @@ impl<S: Clone + Send + Sync + 'static> ErasedHandler<()> for StateBound<S> {
         })
     }
 
-    fn call(self: Box<Self>, req: Request, _state: ()) -> BoxFuture<'static, Response> {
+    fn call(&self, req: Request, _state: ()) -> BoxFuture<'static, Response> {
+        // The wrapped handler still expects an owned S, so the Arc'd state is
+        // cloned here. Eliminating this clone needs the Handler-trait
+        // state-by-ref migration (audit O1 — deferred, breaking); until then,
+        // wrap AppState in Arc internally (documented idiom).
         let state = (*self.state).clone();
         self.inner.call(req, state)
     }
