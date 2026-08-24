@@ -86,6 +86,78 @@ struct CorsConfig {
     expose_headers: Vec<HeaderName>,
     allow_credentials: bool,
     max_age_secs: Option<u64>,
+    // ── Derived once at construction (audit O15) — these are pure functions
+    // of config, so preflight/apply paths stop re-joining Strings per request.
+    methods_hv: HeaderValue,
+    allow_headers_list_hv: Option<HeaderValue>,
+    expose_hv: Option<HeaderValue>,
+    max_age_hv: Option<HeaderValue>,
+}
+
+impl CorsConfig {
+    fn derive_from(
+        parts: impl FnOnce() -> (
+            AllowOrigin,
+            AllowMethods,
+            AllowHeaders,
+            Vec<HeaderName>,
+            bool,
+            Option<u64>,
+        ),
+    ) -> Self {
+        let (
+            allow_origins,
+            allow_methods,
+            allow_headers,
+            expose_headers,
+            allow_credentials,
+            max_age_secs,
+        ) = parts();
+        let methods_hv = match &allow_methods {
+            AllowMethods::Any => {
+                HeaderValue::from_static("GET, HEAD, POST, PUT, DELETE, PATCH, OPTIONS")
+            }
+            AllowMethods::List(ms) => {
+                HeaderValue::from_str(&ms.iter().map(Method::as_str).collect::<Vec<_>>().join(", "))
+                    .unwrap_or_else(|_| HeaderValue::from_static("GET"))
+            }
+        };
+        let allow_headers_list_hv = match &allow_headers {
+            AllowHeaders::List(hs) if !hs.is_empty() => HeaderValue::from_str(
+                &hs.iter()
+                    .map(HeaderName::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+            .ok(),
+            _ => None,
+        };
+        let expose_hv = if expose_headers.is_empty() {
+            None
+        } else {
+            HeaderValue::from_str(
+                &expose_headers
+                    .iter()
+                    .map(HeaderName::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
+            .ok()
+        };
+        let max_age_hv = max_age_secs.and_then(|age| HeaderValue::from_str(&age.to_string()).ok());
+        Self {
+            allow_origins,
+            allow_methods,
+            allow_headers,
+            expose_headers,
+            allow_credentials,
+            max_age_secs,
+            methods_hv,
+            allow_headers_list_hv,
+            expose_hv,
+            max_age_hv,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -121,20 +193,22 @@ impl CorsLayer {
     /// Use the builder methods to configure origins, methods, and headers.
     pub fn new() -> Self {
         Self {
-            config: Arc::new(CorsConfig {
-                allow_origins: AllowOrigin::List(Vec::new()),
-                allow_methods: AllowMethods::List(vec![
-                    Method::GET,
-                    Method::POST,
-                    Method::PUT,
-                    Method::DELETE,
-                    Method::PATCH,
-                ]),
-                allow_headers: AllowHeaders::List(Vec::new()),
-                expose_headers: Vec::new(),
-                allow_credentials: false,
-                max_age_secs: Some(3600),
-            }),
+            config: Arc::new(CorsConfig::derive_from(|| {
+                (
+                    AllowOrigin::List(Vec::new()),
+                    AllowMethods::List(vec![
+                        Method::GET,
+                        Method::POST,
+                        Method::PUT,
+                        Method::DELETE,
+                        Method::PATCH,
+                    ]),
+                    AllowHeaders::List(Vec::new()),
+                    Vec::new(),
+                    false,
+                    Some(3600),
+                )
+            })),
         }
     }
 
@@ -144,14 +218,16 @@ impl CorsLayer {
     /// Suitable for fully public read-only APIs.
     pub fn permissive() -> Self {
         Self {
-            config: Arc::new(CorsConfig {
-                allow_origins: AllowOrigin::Any,
-                allow_methods: AllowMethods::Any,
-                allow_headers: AllowHeaders::Any,
-                expose_headers: Vec::new(),
-                allow_credentials: false,
-                max_age_secs: Some(86400),
-            }),
+            config: Arc::new(CorsConfig::derive_from(|| {
+                (
+                    AllowOrigin::Any,
+                    AllowMethods::Any,
+                    AllowHeaders::Any,
+                    Vec::new(),
+                    false,
+                    Some(86400),
+                )
+            })),
         }
     }
 
@@ -165,14 +241,16 @@ impl CorsLayer {
     /// [`CorsLayer::allow_credentials`].
     pub fn very_permissive() -> Self {
         Self {
-            config: Arc::new(CorsConfig {
-                allow_origins: AllowOrigin::Mirror,
-                allow_methods: AllowMethods::Any,
-                allow_headers: AllowHeaders::Mirror,
-                expose_headers: Vec::new(),
-                allow_credentials: false,
-                max_age_secs: Some(86400),
-            }),
+            config: Arc::new(CorsConfig::derive_from(|| {
+                (
+                    AllowOrigin::Mirror,
+                    AllowMethods::Any,
+                    AllowHeaders::Mirror,
+                    Vec::new(),
+                    false,
+                    Some(86400),
+                )
+            })),
         }
     }
 
@@ -181,6 +259,17 @@ impl CorsLayer {
     fn mutate<F: FnOnce(&mut CorsConfig)>(self, f: F) -> Self {
         let mut cfg = Arc::try_unwrap(self.config).unwrap_or_else(|arc| (*arc).clone());
         f(&mut cfg);
+        let mut cfg = CorsConfig::derive_from(|| {
+            (
+                cfg.allow_origins,
+                cfg.allow_methods,
+                cfg.allow_headers,
+                std::mem::take(&mut cfg.expose_headers),
+                cfg.allow_credentials,
+                cfg.max_age_secs,
+            )
+        });
+        let _ = &mut cfg;
         assert_credentials_safe(&cfg);
         Self {
             config: Arc::new(cfg),
@@ -411,33 +500,15 @@ impl CorsConfig {
         }
     }
 
-    fn methods_header(&self) -> HeaderValue {
-        match &self.allow_methods {
-            AllowMethods::Any => {
-                HeaderValue::from_static("GET, HEAD, POST, PUT, DELETE, PATCH, OPTIONS")
-            }
-            AllowMethods::List(ms) => {
-                let s = ms.iter().map(Method::as_str).collect::<Vec<_>>().join(", ");
-                HeaderValue::from_str(&s).unwrap_or_else(|_| HeaderValue::from_static("GET"))
-            }
-        }
+    fn methods_header(&self) -> &HeaderValue {
+        &self.methods_hv
     }
 
     fn headers_header(&self, request_headers: &http::HeaderMap) -> Option<HeaderValue> {
         match &self.allow_headers {
             AllowHeaders::Any => Some(HeaderValue::from_static("*")),
             AllowHeaders::Mirror => request_headers.get(ACCESS_CONTROL_REQUEST_HEADERS).cloned(),
-            AllowHeaders::List(hs) => {
-                if hs.is_empty() {
-                    return None;
-                }
-                let s = hs
-                    .iter()
-                    .map(HeaderName::as_str)
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                HeaderValue::from_str(&s).ok()
-            }
+            AllowHeaders::List(_) => self.allow_headers_list_hv.clone(),
         }
     }
 
@@ -467,10 +538,8 @@ impl CorsConfig {
             builder = builder.header(ACCESS_CONTROL_ALLOW_CREDENTIALS, "true");
         }
 
-        if let Some(age) = self.max_age_secs {
-            if let Ok(v) = HeaderValue::from_str(&age.to_string()) {
-                builder = builder.header(ACCESS_CONTROL_MAX_AGE, v);
-            }
+        if let Some(age) = &self.max_age_hv {
+            builder = builder.header(ACCESS_CONTROL_MAX_AGE, age.clone());
         }
 
         // Preflight replies are cacheable and differ per Origin, per requested
@@ -478,7 +547,9 @@ impl CorsConfig {
         // cache/CDN cannot serve one page's preflight to another.
         builder = builder.header(
             VARY,
-            "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+            HeaderValue::from_static(
+                "Origin, Access-Control-Request-Method, Access-Control-Request-Headers",
+            ),
         );
 
         builder.body(Body::empty())
@@ -504,16 +575,8 @@ impl CorsConfig {
             );
         }
 
-        if !self.expose_headers.is_empty() {
-            let s = self
-                .expose_headers
-                .iter()
-                .map(HeaderName::as_str)
-                .collect::<Vec<_>>()
-                .join(", ");
-            if let Ok(v) = HeaderValue::from_str(&s) {
-                headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, v);
-            }
+        if let Some(expose) = &self.expose_hv {
+            headers.insert(ACCESS_CONTROL_EXPOSE_HEADERS, expose.clone());
         }
 
         // Vary: Origin — ensures caches don't serve wrong-origin responses

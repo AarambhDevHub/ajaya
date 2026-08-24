@@ -323,9 +323,14 @@ where
         };
         let request_id = request_id(&req, &self.request_id_header);
 
+        // One parse/validate; the response side clones (cheap Bytes bump)
+        // instead of re-running from_str per request.
+        let request_header = HeaderValue::from_str(&request_id).ok();
+        let response_header = request_header.clone();
+
         req.extensions_mut()
             .insert(RequestId::from_string(request_id.clone()));
-        if let Ok(value) = HeaderValue::from_str(&request_id) {
+        if let Some(value) = request_header {
             req.headers_mut()
                 .insert(self.request_id_header.clone(), value);
         }
@@ -343,7 +348,6 @@ where
         };
 
         let request_id_header = self.request_id_header.clone();
-        let request_id_for_response = request_id.clone();
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
 
@@ -351,26 +355,33 @@ where
             let started = Instant::now();
             let mut response = inner.call(req).instrument(span.clone()).await?;
             let status = response.status();
-            let route = response
-                .extensions()
-                .get::<MatchedPathExt>()
-                .map(|matched| matched.0.to_string())
-                .unwrap_or_else(|| "__unknown".to_string());
             let latency_ms = started.elapsed().as_millis();
 
-            if let Ok(value) = HeaderValue::from_str(&request_id_for_response) {
+            if let Some(value) = response_header {
                 response.headers_mut().insert(request_id_header, value);
             }
 
+            // Route is only consumed by span records/events — skipped entirely
+            // when the span was gated off.
+            let route: &str = if span.is_none() {
+                ""
+            } else {
+                response
+                    .extensions()
+                    .get::<MatchedPathExt>()
+                    .map(|matched| matched.0.as_ref())
+                    .unwrap_or("__unknown")
+            };
+
             span.record("http.status_code", status.as_u16());
-            span.record("http.route", route.as_str());
+            span.record("http.route", route);
             span.record("latency_ms", latency_ms);
 
             if status.is_server_error() {
                 tracing::error!(
                     parent: &span,
                     status = status.as_u16(),
-                    route = route.as_str(),
+                    route = route,
                     latency_ms = latency_ms,
                     "request completed"
                 );
@@ -378,7 +389,7 @@ where
                 tracing::warn!(
                     parent: &span,
                     status = status.as_u16(),
-                    route = route.as_str(),
+                    route = route,
                     latency_ms = latency_ms,
                     "request completed"
                 );
@@ -386,7 +397,7 @@ where
                 tracing::info!(
                     parent: &span,
                     status = status.as_u16(),
-                    route = route.as_str(),
+                    route = route,
                     latency_ms = latency_ms,
                     "request completed"
                 );

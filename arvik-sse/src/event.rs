@@ -73,7 +73,13 @@ impl Event {
     ///
     /// `\r\n` and lone `\r` are normalized to `\n` (SSE spec §9.2).
     pub fn data(mut self, data: impl Into<String>) -> Self {
-        let s = data.into().replace("\r\n", "\n").replace('\r', "\n");
+        // Skip two allocations when there is no CR to normalize.
+        let raw = data.into();
+        let s = if raw.contains('\r') {
+            raw.replace("\r\n", "\n").replace('\r', "\n")
+        } else {
+            raw
+        };
         self.data = Some(s);
         self
     }
@@ -131,7 +137,12 @@ impl Event {
     ///
     /// [`KeepAlive`]: crate::KeepAlive
     pub fn comment(mut self, comment: impl Into<String>) -> Self {
-        let s = comment.into().replace("\r\n", "\n").replace('\r', "\n");
+        let raw = comment.into();
+        let s = if raw.contains('\r') {
+            raw.replace("\r\n", "\n").replace('\r', "\n")
+        } else {
+            raw
+        };
         self.comment = Some(s);
         self
     }

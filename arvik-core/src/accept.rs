@@ -37,26 +37,51 @@ pub fn parse_accept_encodings(value: &str) -> Vec<(String, f32)> {
 ///
 /// An exact `;q=0` entry refuses that coding even when `*` is present; codings
 /// not mentioned at all fall back to the `*` wildcard's weight.
+///
+/// Allocation-free: compares case-insensitively over the raw header slice.
 pub fn negotiate<'a>(supported: &[&'a str], accept_encoding: &str) -> Option<&'a str> {
-    let entries = parse_accept_encodings(accept_encoding);
-    let wildcard_q = entries
-        .iter()
-        .rev()
-        .find(|(coding, _)| coding == "*")
-        .map(|(_, q)| *q)
-        .unwrap_or(0.0);
+    for candidate in supported {
+        let mut exact_seen = false;
+        let mut exact_allowed = false;
+        let mut wildcard_allowed = false;
 
-    supported.iter().copied().find(|candidate| {
-        let candidate = candidate.to_ascii_lowercase();
-        match entries
-            .iter()
-            .rev()
-            .find(|(coding, _)| *coding == candidate)
-        {
-            Some((_, q)) => *q > 0.0,
-            None => wildcard_q > 0.0,
+        for entry in accept_encoding.split(',') {
+            let mut segments = entry.trim().split(';');
+            let coding = segments.next().map(str::trim).unwrap_or("");
+            if coding.eq_ignore_ascii_case(candidate) {
+                exact_seen = true;
+                exact_allowed = parse_q(segments) > 0.0;
+            } else if coding == "*" {
+                wildcard_allowed = parse_q(segments) > 0.0;
+            }
         }
-    })
+
+        let allowed = if exact_seen {
+            exact_allowed
+        } else {
+            wildcard_allowed
+        };
+        if allowed {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Parse the `;q=` parameter from the remaining attribute segments
+/// (defaulting to 1.0).
+fn parse_q<'a, I: Iterator<Item = &'a str>>(segments: I) -> f32 {
+    let mut quality = 1.0_f32;
+    for parameter in segments {
+        let parameter = parameter.trim();
+        if let Some(q) = parameter
+            .strip_prefix("q=")
+            .or_else(|| parameter.strip_prefix("Q="))
+        {
+            quality = q.trim().parse().unwrap_or(1.0);
+        }
+    }
+    quality.clamp(0.0, 1.0)
 }
 
 #[cfg(test)]

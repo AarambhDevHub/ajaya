@@ -119,6 +119,18 @@ impl ResponseBuilder {
             .body(Body::from(html.into()))
     }
 
+    /// Build a plain text response from static data.
+    ///
+    /// Zero-copy: both the body bytes and the Content-Type header come from
+    /// `'static` data, avoiding a String allocation per response.
+    pub fn text_static(self, text: &'static str) -> Response {
+        self.header(
+            http::header::CONTENT_TYPE,
+            http::header::HeaderValue::from_static("text/plain; charset=utf-8"),
+        )
+        .body(Body::from_static(text.as_bytes()))
+    }
+
     /// Build a plain text response.
     ///
     /// Sets `Content-Type: text/plain; charset=utf-8`.

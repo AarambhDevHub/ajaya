@@ -122,13 +122,17 @@ where
             .map(RequestId::from_string)
             .unwrap_or_else(RequestId::new);
 
-        let id_str = request_id.0.clone();
+        // Build the header value ONCE and clone it (a cheap Bytes refcount
+        // bump) for the second insert — previously the id string was cloned
+        // and re-parsed/validated into two separate HeaderValues per request.
+        let request_header = HeaderValue::from_str(&request_id.0).ok();
+        let response_header = request_header.clone();
 
         // Insert as extension so handlers can access it
         req.extensions_mut().insert(request_id);
 
         // Also set on request headers for downstream middleware
-        if let Ok(val) = HeaderValue::from_str(&id_str) {
+        if let Some(val) = request_header {
             req.headers_mut().insert(X_REQUEST_ID, val);
         }
 
@@ -139,7 +143,7 @@ where
             let mut response = inner.call(req).await?;
 
             // Propagate the request ID to the response
-            if let Ok(val) = HeaderValue::from_str(&id_str) {
+            if let Some(val) = response_header {
                 response.headers_mut().insert(X_REQUEST_ID, val);
             }
 

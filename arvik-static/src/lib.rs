@@ -45,6 +45,9 @@ pub struct ServeDir {
     /// When false (default), requests resolving through a symlink to outside
     /// the (canonicalized) root are rejected.
     follow_symlinks: bool,
+    /// Canonicalized serve root, resolved once on first use instead of per
+    /// request (each `canonicalize` is a blocking-pool round-trip).
+    canonical_root: tokio::sync::OnceCell<Option<std::sync::Arc<PathBuf>>>,
 }
 
 #[cfg(feature = "fs")]
@@ -62,6 +65,7 @@ impl ServeDir {
             chunk_size: DEFAULT_CHUNK_SIZE,
             cache_control: None,
             follow_symlinks: false,
+            canonical_root: tokio::sync::OnceCell::new(),
         }
     }
 
@@ -157,7 +161,9 @@ impl ServeDir {
         // Symlink containment: a planted link must not serve bytes from
         // outside the (canonicalized) root. Checked on the canonical path so
         // escapes through intermediate directories are caught too.
-        if !self.follow_symlinks && !path_contained(&self.root, &candidate).await {
+        if !self.follow_symlinks
+            && !path_contained(&self.root, &self.canonical_root, &candidate).await
+        {
             return self.call_fallback(req).await;
         }
 
@@ -174,7 +180,13 @@ impl ServeDir {
         let accepts_gzip = self.precompressed_gzip && accepts_encoding(&req, "gzip");
 
         match self
-            .select_file(candidate, &relative.asset_path, accepts_br, accepts_gzip)
+            .select_file(
+                candidate,
+                metadata,
+                &relative.asset_path,
+                accepts_br,
+                accepts_gzip,
+            )
             .await
         {
             Ok(asset) => {
@@ -198,17 +210,21 @@ impl ServeDir {
 
         if self.append_index_html_on_directories {
             let index_path = dir.join(INDEX_FILE);
-            if tokio::fs::metadata(&index_path)
-                .await
-                .map(|m| m.is_file())
-                .unwrap_or(false)
-            {
+            let index_meta = tokio::fs::metadata(&index_path).await;
+            if index_meta.as_ref().is_ok_and(|m| m.is_file()) {
+                let index_meta = index_meta.unwrap();
                 let index_asset_path = join_asset_path(&relative.asset_path, INDEX_FILE);
                 let accepts_br = self.precompressed_br && accepts_encoding(&req, "br");
                 let accepts_gzip = self.precompressed_gzip && accepts_encoding(&req, "gzip");
 
                 return match self
-                    .select_file(index_path, &index_asset_path, accepts_br, accepts_gzip)
+                    .select_file(
+                        index_path,
+                        index_meta,
+                        &index_asset_path,
+                        accepts_br,
+                        accepts_gzip,
+                    )
                     .await
                 {
                     Ok(asset) => {
@@ -236,6 +252,7 @@ impl ServeDir {
     async fn select_file(
         &self,
         path: PathBuf,
+        existing: std::fs::Metadata,
         asset_path: &str,
         accepts_br: bool,
         accepts_gzip: bool,
@@ -272,7 +289,10 @@ impl ServeDir {
             }
         }
 
-        if !tokio::fs::metadata(&path).await.is_ok_and(|m| m.is_file()) {
+        // `handle` already statted this exact path and ruled out directories —
+        // reuse that metadata instead of a second syscall. A file vanishing
+        // between here and the open fails safely inside `serve_fs_asset`.
+        if !existing.is_file() {
             return Err(());
         }
         Ok(FsCandidate {
@@ -1019,12 +1039,26 @@ fn serve_embedded_asset(
 /// links are caught as well as direct file links. Unresolvable paths are
 /// treated as not contained.
 #[cfg(feature = "fs")]
-async fn path_contained(root: &Path, path: &Path) -> bool {
-    let Ok(canonical_root) = tokio::fs::canonicalize(root).await else {
+async fn path_contained(
+    root: &Path,
+    cached_root: &tokio::sync::OnceCell<Option<std::sync::Arc<PathBuf>>>,
+    path: &Path,
+) -> bool {
+    // The serve root is canonicalized exactly once; only the candidate path
+    // pays a realpath walk per request.
+    let canonical_root = cached_root
+        .get_or_init(|| async {
+            tokio::fs::canonicalize(root)
+                .await
+                .ok()
+                .map(std::sync::Arc::new)
+        })
+        .await;
+    let Some(canonical_root) = canonical_root else {
         return false;
     };
     match tokio::fs::canonicalize(path).await {
-        Ok(canonical_path) => canonical_path.starts_with(&canonical_root),
+        Ok(canonical_path) => canonical_path.starts_with(&**canonical_root),
         Err(_) => false,
     }
 }

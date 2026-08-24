@@ -35,6 +35,13 @@ use crate::method_router::{MethodRouter, StateBound};
 use crate::params::PathParams;
 use crate::service::{ServiceHandler, StripPrefixService};
 
+/// Shared sentinel labels for unmatched / fallback dispatch — avoids a heap
+/// allocation per 404 under path-scanning load.
+static FALLBACK_LABEL: std::sync::LazyLock<Arc<str>> =
+    std::sync::LazyLock::new(|| Arc::from("__fallback"));
+static UNMATCHED_LABEL: std::sync::LazyLock<Arc<str>> =
+    std::sync::LazyLock::new(|| Arc::from("__unmatched"));
+
 /// Metadata emitted by route macros and used by `collect_routes!`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RouteMeta {
@@ -160,6 +167,10 @@ pub struct Router<S = ()> {
 struct RouteEntry<S> {
     pattern: Arc<str>,
     method_router: MethodRouter<S>,
+    /// Param names interned from the FIRST match — matchit owns the pattern
+    /// strings for the router's lifetime, so later requests only refcount
+    /// instead of re-allocating each key (`Arc::from(k)`).
+    param_keys: std::sync::OnceLock<Vec<Arc<str>>>,
 }
 
 impl<S> RouteEntry<S> {
@@ -167,6 +178,7 @@ impl<S> RouteEntry<S> {
         Self {
             pattern: Arc::from(path),
             method_router,
+            param_keys: std::sync::OnceLock::new(),
         }
     }
 }
@@ -406,6 +418,7 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
             .map(|entry| RouteEntry {
                 pattern: entry.pattern,
                 method_router: entry.method_router.with_state((*state).clone()),
+                param_keys: entry.param_keys,
             })
             .collect();
 
@@ -442,11 +455,13 @@ impl<S: Clone + Send + Sync + 'static> Router<S> {
 
                 if !matched.params.is_empty() {
                     let mut pp = PathParams::new();
-                    // matchit's keys are the declared names — including
-                    // mid-segment params like `{id}.png` that positional
-                    // pattern parsing cannot align with.
-                    for (k, v) in matched.params.iter() {
-                        pp.push(Arc::from(k), percent_decode(v).into_owned());
+                    // Keys are interned on first sight of this route; values
+                    // only allocate when decoding actually changed bytes.
+                    let keys = entry
+                        .param_keys
+                        .get_or_init(|| matched.params.iter().map(|(k, _)| Arc::from(k)).collect());
+                    for (idx, (_, v)) in matched.params.iter().enumerate() {
+                        pp.push(Arc::clone(&keys[idx]), percent_decode(v).into_owned());
                     }
                     req.extensions_mut().insert(pp);
                 }
@@ -559,11 +574,13 @@ impl RouterInner {
 
                 if !matched.params.is_empty() {
                     let mut pp = PathParams::new();
-                    // matchit's keys are the declared names — including
-                    // mid-segment params like `{id}.png` that positional
-                    // pattern parsing cannot align with.
-                    for (k, v) in matched.params.iter() {
-                        pp.push(Arc::from(k), percent_decode(v).into_owned());
+                    // Keys are interned on first sight of this route; values
+                    // only allocate when decoding actually changed bytes.
+                    let keys = entry
+                        .param_keys
+                        .get_or_init(|| matched.params.iter().map(|(k, _)| Arc::from(k)).collect());
+                    for (idx, (_, v)) in matched.params.iter().enumerate() {
+                        pp.push(Arc::clone(&keys[idx]), percent_decode(v).into_owned());
                     }
                     req.extensions_mut().insert(pp);
                 }
@@ -583,13 +600,13 @@ impl RouterInner {
                     let mut response = fb.clone_box().call(req, ()).await;
                     response
                         .extensions_mut()
-                        .insert(MatchedPathExt(Arc::from("__fallback")));
+                        .insert(MatchedPathExt(std::sync::Arc::clone(&FALLBACK_LABEL)));
                     return response;
                 }
                 let mut response = not_found();
                 response
                     .extensions_mut()
-                    .insert(MatchedPathExt(Arc::from("__unmatched")));
+                    .insert(MatchedPathExt(std::sync::Arc::clone(&UNMATCHED_LABEL)));
                 response
             }
         }
@@ -651,7 +668,7 @@ fn not_found() -> Response {
     ResponseBuilder::new()
         .status(StatusCode::NOT_FOUND)
         .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-        .text("Not Found")
+        .text_static("Not Found")
 }
 
 fn normalize_service_prefix(prefix: &str) -> String {

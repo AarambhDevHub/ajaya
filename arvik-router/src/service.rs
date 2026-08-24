@@ -103,6 +103,7 @@ where
     }
 
     fn call(&mut self, mut req: Request) -> Self::Future {
+        // Single clone: serves both the OriginalUri extension and the strip.
         let original_uri = req.uri().clone();
         if req.extensions().get::<OriginalUri>().is_none() {
             req.extensions_mut()
@@ -119,16 +120,17 @@ where
 
 fn strip_uri_prefix(uri: &Uri, prefix: &str) -> Option<Uri> {
     let path = uri.path();
-    let stripped_path = if prefix == "/" {
-        path
+    let stripped_path = if prefix == "/" || !path.starts_with(prefix) {
+        // Nothing to strip — callers keep the original Uri without a
+        // to_string + re-parse round-trip (audit O6).
+        return None;
     } else if path == prefix
         || (path.len() == prefix.len() + 1 && path.starts_with(prefix) && path.ends_with('/'))
     {
         "/"
     } else {
         path.strip_prefix(prefix)
-            .filter(|rest| rest.starts_with('/'))
-            .unwrap_or(path)
+            .filter(|rest| rest.starts_with('/'))?
     };
 
     let mut path_and_query = stripped_path.to_string();

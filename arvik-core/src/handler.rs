@@ -180,7 +180,11 @@ pub trait ErasedHandler<S>: Send + Sync {
     fn clone_box(&self) -> Box<dyn ErasedHandler<S>>;
 
     /// Call this handler, returning a boxed future.
-    fn call(self: Box<Self>, req: Request, state: S) -> BoxFuture<'static, Response>;
+    ///
+    /// Takes `&self` — the concrete handler is cloned into the returned
+    /// future (it must be `Clone`), so dispatch never allocates an extra
+    /// boxed handler per request.
+    fn call(&self, req: Request, state: S) -> BoxFuture<'static, Response>;
 }
 
 impl<H, T, S> ErasedHandler<S> for ErasedHandlerWrapper<H, T, S>
@@ -193,8 +197,9 @@ where
         Box::new(self.clone())
     }
 
-    fn call(self: Box<Self>, req: Request, state: S) -> BoxFuture<'static, Response> {
-        let fut = self.handler.call(req, state);
+    fn call(&self, req: Request, state: S) -> BoxFuture<'static, Response> {
+        let handler = self.handler.clone();
+        let fut = handler.call(req, state);
         Box::pin(fut)
     }
 }

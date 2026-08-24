@@ -52,7 +52,14 @@ pub struct MethodRouter<S = ()> {
     /// Bitmask of all registered methods — used to build the `Allow` header.
     allow_methods: MethodFilter,
     /// Tower layers applied to each matched handler (innermost = first in vec).
-    layers: Vec<LayerFn>,
+    /// Behind an Arc so cloning the router stays allocation-free.
+    layers: std::sync::Arc<Vec<LayerFn>>,
+    /// Per-handler layer stacks folded ONCE after `with_state` binds the
+    /// state (indexed like `handlers`; `None` = no layers → fast path).
+    /// Valid only once the state is fixed (`S = ()`), hence the flag.
+    baked: std::sync::OnceLock<std::sync::Arc<Vec<Option<BoxCloneService>>>>,
+    /// True after `with_state` — the baked stacks above may be built.
+    bakeable: bool,
 }
 
 /// Mutable access to a handler list that may be shared behind an Arc.
@@ -82,7 +89,9 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         Self {
             handlers: std::sync::Arc::new(Vec::new()),
             allow_methods: MethodFilter::NONE,
-            layers: Vec::new(),
+            layers: std::sync::Arc::new(Vec::new()),
+            baked: std::sync::OnceLock::new(),
+            bakeable: false,
         }
     }
 
@@ -94,6 +103,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     {
         self.allow_methods |= filter;
         handlers_mut(&mut self.handlers).push((filter, into_erased(handler)));
+        self.baked = std::sync::OnceLock::new();
         self
     }
 
@@ -109,7 +119,9 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         self.allow_methods |= other.allow_methods;
         handlers_mut(&mut self.handlers)
             .extend(other.handlers.iter().map(|(f, h)| (*f, h.clone_box())));
-        self.layers.extend(other.layers);
+        std::sync::Arc::make_mut(&mut self.layers).extend(other.layers.iter().cloned());
+        self.baked = std::sync::OnceLock::new();
+        self.bakeable = false;
         self
     }
 
@@ -207,7 +219,8 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
             + 'static,
         <L::Service as Service<Request>>::Future: Send + 'static,
     {
-        self.layers.push(into_layer_fn(layer));
+        std::sync::Arc::make_mut(&mut self.layers).push(into_layer_fn(layer));
+        self.baked = std::sync::OnceLock::new();
         self
     }
 
@@ -223,26 +236,49 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// (e.g. `PURGE`) unless the route registered [`MethodFilter::EXTENSION`]
     /// or [`MethodFilter::ANY`].
     pub async fn call(&self, req: Request, state: S) -> Response {
-        let method = req.method().clone();
-        let method_filter = MethodFilter::from_method(&method);
+        // Borrowed — no Method clone per request.
+        let method = req.method();
+        let method_filter = MethodFilter::from_method(method);
 
         // RFC 9110 §9.3.2: a HEAD response is a GET response without a body,
         // so fall back to the GET handler unless HEAD was explicitly bound.
         let head_falls_back_to_get =
-            method == http::Method::HEAD && !self.allow_methods.contains(MethodFilter::HEAD);
+            *method == http::Method::HEAD && !self.allow_methods.contains(MethodFilter::HEAD);
 
-        for (filter, handler) in self.handlers.iter() {
+        // Baked per-handler layer stacks exist once the state is bound
+        // (`with_state`): fold every layer exactly once instead of rebuilding
+        // the whole stack per request.
+        let baked = if self.bakeable && !self.layers.is_empty() {
+            Some(self.baked.get_or_init(|| {
+                std::sync::Arc::new(
+                    self.handlers
+                        .iter()
+                        .map(|(_, handler)| {
+                            let base = BoxCloneService::new(HandlerService {
+                                handler: handler.clone_box(),
+                                state: state.clone(),
+                            });
+                            Some(apply_layers(base, &self.layers))
+                        })
+                        .collect(),
+                )
+            }))
+        } else {
+            None
+        };
+
+        for (idx, (filter, handler)) in self.handlers.iter().enumerate() {
             let matched = filter.contains(method_filter)
                 || (head_falls_back_to_get && filter.contains(MethodFilter::GET));
             if matched {
+                if let Some(baked) = baked.as_ref().and_then(|stack| stack[idx].as_ref()) {
+                    return oneshot(baked.clone(), req).await;
+                }
                 if self.layers.is_empty() {
                     // ── Fast path: no per-route layers ──────────────────────
-                    let h = handler.clone_box();
-                    return h.call(req, state).await;
+                    return handler.call(req, state).await;
                 } else {
-                    // ── Layered path ─────────────────────────────────────────
-                    // Wrap the handler in a Tower service so layers can compose
-                    // around it with the standard Layer<S> protocol.
+                    // ── Layered path (unbound generic router; rare) ─────────
                     let h = handler.clone_box();
                     let base = BoxCloneService::new(HandlerService {
                         handler: h,
@@ -259,7 +295,7 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
         ResponseBuilder::new()
             .status(StatusCode::METHOD_NOT_ALLOWED)
             .header(http::header::ALLOW, allow)
-            .text("Method Not Allowed")
+            .text_static("Method Not Allowed")
     }
 
     /// Append already-erased layers to this router's per-route stack.
@@ -269,7 +305,12 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
     /// into the parent: appended layers wrap the ones registered earlier,
     /// matching the router-level (`layer` outside `route_layer`) ordering.
     pub(crate) fn extend_layers(&mut self, extra: impl IntoIterator<Item = LayerFn>) {
-        self.layers.extend(extra);
+        let extra: Vec<LayerFn> = extra.into_iter().collect();
+        if extra.is_empty() {
+            return;
+        }
+        std::sync::Arc::make_mut(&mut self.layers).extend(extra);
+        self.baked = std::sync::OnceLock::new();
     }
 
     /// Bind application state, converting `MethodRouter<S>` → `MethodRouter<()>`.
@@ -305,6 +346,8 @@ impl<S: Clone + Send + Sync + 'static> MethodRouter<S> {
             handlers,
             allow_methods: self.allow_methods,
             layers: self.layers, // LayerFn is state-independent — pass through
+            baked: std::sync::OnceLock::new(),
+            bakeable: true, // state is now fixed to () — stacks may be baked
         }
     }
 }
@@ -315,7 +358,11 @@ impl<S: Clone + Send + Sync + 'static> Clone for MethodRouter<S> {
         Self {
             handlers: std::sync::Arc::clone(&self.handlers),
             allow_methods: self.allow_methods,
-            layers: self.layers.clone(), // LayerFn is Arc-backed — O(n) cheap
+            layers: std::sync::Arc::clone(&self.layers),
+            // Clones share handlers but not a fixed state binding, so they
+            // rebuild their own stacks lazily only if re-bound via with_state.
+            baked: std::sync::OnceLock::new(),
+            bakeable: false,
         }
     }
 }
@@ -379,7 +426,11 @@ impl<S: Clone + Send + Sync + 'static> ErasedHandler<()> for StateBound<S> {
         })
     }
 
-    fn call(self: Box<Self>, req: Request, _state: ()) -> BoxFuture<'static, Response> {
+    fn call(&self, req: Request, _state: ()) -> BoxFuture<'static, Response> {
+        // The wrapped handler still expects an owned S, so the Arc'd state is
+        // cloned here. Eliminating this clone needs the Handler-trait
+        // state-by-ref migration (audit O1 — deferred, breaking); until then,
+        // wrap AppState in Arc internally (documented idiom).
         let state = (*self.state).clone();
         self.inner.call(req, state)
     }

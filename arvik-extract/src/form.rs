@@ -72,8 +72,12 @@ fn form_content_type(headers: &http::HeaderMap) -> bool {
         Err(_) => return false,
     };
 
-    // Parse as a media type so parameter suffixes (`;charset=utf-8`) pass but
-    // bogus extensions (`…urlencodedfoo`) do not.
+    // Fast path for the exact constant.
+    if content_type.eq_ignore_ascii_case("application/x-www-form-urlencoded") {
+        return true;
+    }
+
+    // Parameterized variants need a real parse.
     match content_type.parse::<mime::Mime>() {
         Ok(mime) => mime.type_() == mime::APPLICATION && mime.subtype() == "x-www-form-urlencoded",
         Err(_) => false,

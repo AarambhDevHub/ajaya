@@ -285,6 +285,7 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
+        // Owned: `method` must outlive `req`, which moves into the future.
         let method = req.method().as_str().to_owned();
         let registry = self.registry.clone();
         let labels = self.labels.clone();
@@ -298,20 +299,13 @@ where
             req
         };
 
-        let pending_status = "pending";
-        let pending_values = labels.values(&method, PENDING_ROUTE, pending_status);
-        registry
+        let pending_values = labels.values(&method, PENDING_ROUTE, "pending");
+        let in_flight_gauge = registry
             .inner
             .requests_in_flight
-            .with_label_values(&pending_values)
-            .inc();
-        let in_flight = InFlightGuard::new(
-            registry.clone(),
-            labels.clone(),
-            method.clone(),
-            PENDING_ROUTE.to_string(),
-            pending_status.to_string(),
-        );
+            .with_label_values(&pending_values);
+        in_flight_gauge.inc();
+        let in_flight = InFlightGuard::new(in_flight_gauge.clone());
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
@@ -320,7 +314,9 @@ where
             let start = Instant::now();
             let mut response = inner.call(req).await?;
             let elapsed = start.elapsed().as_secs_f64();
-            let status = response.status().as_u16().to_string();
+            let raw_status = response.status().as_u16();
+            // Owned: `response` is reassigned below for body counting.
+            let status = format!("{raw_status:03}");
             let route = matched_route(response.extensions());
             let values = labels.values(&method, &route, &status);
 
@@ -479,28 +475,14 @@ impl Drop for CountingBody {
 }
 
 struct InFlightGuard {
-    registry: MetricsRegistry,
-    labels: StaticLabels,
-    method: String,
-    route: String,
-    status: String,
+    gauge: prometheus::IntGauge,
     active: bool,
 }
 
 impl InFlightGuard {
-    fn new(
-        registry: MetricsRegistry,
-        labels: StaticLabels,
-        method: String,
-        route: String,
-        status: String,
-    ) -> Self {
+    fn new(gauge: prometheus::IntGauge) -> Self {
         Self {
-            registry,
-            labels,
-            method,
-            route,
-            status,
+            gauge,
             active: true,
         }
     }
@@ -509,13 +491,7 @@ impl InFlightGuard {
 impl Drop for InFlightGuard {
     fn drop(&mut self) {
         if self.active {
-            let values = self.labels.values(&self.method, &self.route, &self.status);
-            self.registry
-                .inner
-                .requests_in_flight
-                .with_label_values(&values)
-                .dec();
-            self.active = false;
+            self.gauge.dec();
         }
     }
 }

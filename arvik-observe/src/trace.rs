@@ -161,10 +161,9 @@ fn make_http_span(service_name: &str, method: &str, url: &str, user_agent: &str)
         http.status_code = tracing::field::Empty,
         http.route = tracing::field::Empty,
     );
-    span.set_attribute("service.name", service_name.to_owned());
-    span.set_attribute("http.method", method.to_owned());
-    span.set_attribute("http.url", url.to_owned());
-    span.set_attribute("http.user_agent", user_agent.to_owned());
+    // The four fields above are converted to OTel attributes by the
+    // tracing-opentelemetry layer itself — setting them again here duplicated
+    // every allocation per request (audit O23).
     span
 }
 
