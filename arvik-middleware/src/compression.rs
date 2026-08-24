@@ -143,29 +143,19 @@ impl CompressionLayer {
     }
 
     fn preferred_encoding(&self, accept_encoding: &str) -> Option<Encoding> {
-        // Priority order zstd > br > gzip > deflate, negotiated with real
-        // q-value semantics (substring matching used to serve brotli to
-        // clients that explicitly refused it with `br;q=0`).
-        let mut candidates = Vec::with_capacity(4);
-        if self.zstd {
-            candidates.push(("zstd", Encoding::Zstd));
+        // Priority order zstd > br > gzip > deflate. Allocation-free: fixed
+        // candidate list filtered by the layer flags.
+        for (enabled, name, encoding) in [
+            (self.zstd, "zstd", Encoding::Zstd),
+            (self.br, "br", Encoding::Br),
+            (self.gzip, "gzip", Encoding::Gzip),
+            (self.deflate, "deflate", Encoding::Deflate),
+        ] {
+            if enabled && arvik_core::accept::negotiate(&[name], accept_encoding).is_some() {
+                return Some(encoding);
+            }
         }
-        if self.br {
-            candidates.push(("br", Encoding::Br));
-        }
-        if self.gzip {
-            candidates.push(("gzip", Encoding::Gzip));
-        }
-        if self.deflate {
-            candidates.push(("deflate", Encoding::Deflate));
-        }
-        let names: Vec<&str> = candidates.iter().map(|(name, _)| *name).collect();
-        arvik_core::accept::negotiate(&names, accept_encoding).and_then(|chosen| {
-            candidates
-                .into_iter()
-                .find(|(name, _)| *name == chosen)
-                .map(|(_, encoding)| encoding)
-        })
+        None
     }
 }
 
@@ -202,20 +192,28 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         let config = self.config.clone();
-        let accept_encoding = req
+        let is_head = req.method() == http::Method::HEAD;
+
+        // Negotiate up front from the borrowed header — negotiation does not
+        // depend on the response. A missing/empty Accept-Encoding (plain
+        // clients, load tools) skips straight to pass-through with zero
+        // allocations.
+        let encoding = req
             .headers()
             .get(ACCEPT_ENCODING)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.is_empty())
+            .and_then(|accept| config.preferred_encoding(accept));
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
 
-        let is_head = req.method() == http::Method::HEAD;
-
         Box::pin(async move {
             let response = inner.call(req).await?;
+
+            let Some(encoding) = encoding else {
+                return Ok(response);
+            };
 
             // Don't compress if already encoded.
             if response.headers().contains_key(CONTENT_ENCODING) {
@@ -231,11 +229,6 @@ where
             if !should_compress(response.headers()) {
                 return Ok(response);
             }
-
-            let encoding = match config.preferred_encoding(&accept_encoding) {
-                Some(e) => e,
-                None => return Ok(response),
-            };
 
             Ok(compress_response(response, encoding, &config).await)
         })

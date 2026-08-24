@@ -110,9 +110,18 @@ impl DefaultMakeSpan {
             return Span::none();
         }
 
-        let method = req.method().as_str().to_owned();
-        let path = req.uri().path().to_owned();
-        let version = format!("{:?}", req.version());
+        // Borrow instead of allocating: tracing copies field data itself,
+        // and the version is one of five constants.
+        let method = req.method().as_str();
+        let path = req.uri().path();
+        let version: &str = match req.version() {
+            http::Version::HTTP_09 => "HTTP/0.9",
+            http::Version::HTTP_10 => "HTTP/1.0",
+            http::Version::HTTP_11 => "HTTP/1.1",
+            http::Version::HTTP_2 => "HTTP/2.0",
+            http::Version::HTTP_3 => "HTTP/3.0",
+            _ => "unknown",
+        };
 
         let span = match self.level {
             Level::ERROR => tracing::error_span!(
@@ -270,6 +279,13 @@ where
             // span.enter(), it cannot corrupt the thread-local span stack
             // while the task awaits across worker threads.
             let response = inner.call(req).instrument(span.clone()).await?;
+
+            // When the span was gated off at make_span, skip the latency
+            // formatting and every record/event below — they were pure
+            // allocation on filtered-out requests.
+            if span.is_none() {
+                return Ok(response);
+            }
 
             let elapsed = start.elapsed();
             let status = response.status();
