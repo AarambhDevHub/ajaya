@@ -67,6 +67,25 @@ use crate::state::FromRef;
 // Shared cookie parsing helper
 // ---------------------------------------------------------------------------
 
+/// Memoization key for the parsed `Cookie` header (audit C15). Handlers that
+/// take several cookie-jar extractors parse the header once instead of once
+/// per extractor.
+#[derive(Clone)]
+struct CachedCookies(std::sync::Arc<InnerJar>);
+
+/// Return this request's parsed cookie jar, parsing (and caching) on first
+/// use. Callers still get an owned jar so mutation keeps working unchanged.
+fn request_cookie_jar(parts: &mut RequestParts) -> InnerJar {
+    if let Some(cached) = parts.extensions().get::<CachedCookies>() {
+        return (*cached.0).clone();
+    }
+    let jar = parse_cookie_header(parts);
+    parts
+        .extensions_mut()
+        .insert(CachedCookies(std::sync::Arc::new(jar.clone())));
+    jar
+}
+
 /// Parse the `Cookie` header of a request into an inner `cookie::CookieJar`.
 fn parse_cookie_header(parts: &RequestParts) -> InnerJar {
     let mut jar = InnerJar::new();
@@ -166,9 +185,8 @@ impl<S: Send + Sync> FromRequestParts<S> for CookieJar {
         parts: &mut RequestParts,
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
-        Ok(CookieJar {
-            inner: parse_cookie_header(parts),
-        })
+        let inner = request_cookie_jar(parts);
+        Ok(CookieJar { inner })
     }
 }
 
@@ -246,7 +264,7 @@ where
         state: &S,
     ) -> Result<Self, Self::Rejection> {
         let key = Key::from_ref(state);
-        let inner = parse_cookie_header(parts);
+        let inner = request_cookie_jar(parts);
         Ok(SignedCookieJar { inner, key })
     }
 }
@@ -319,7 +337,7 @@ where
         state: &S,
     ) -> Result<Self, Self::Rejection> {
         let key = Key::from_ref(state);
-        let inner = parse_cookie_header(parts);
+        let inner = request_cookie_jar(parts);
         Ok(PrivateCookieJar { inner, key })
     }
 }

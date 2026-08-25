@@ -264,7 +264,10 @@ impl Field {
         };
 
         let std_file = temp.as_file().try_clone().map_err(MultipartError::Io)?;
-        let mut writer = tokio::fs::File::from_std(std_file);
+        // Buffered: chunked uploads otherwise pay one blocking-pool write
+        // syscall per network chunk (audit C15).
+        let mut writer =
+            tokio::io::BufWriter::with_capacity(64 * 1024, tokio::fs::File::from_std(std_file));
         let mut bytes_written = 0_u64;
         let metadata = self.metadata.clone();
 
@@ -696,14 +699,44 @@ fn validate_multipart_request(
         .and_then(|v| v.to_str().ok())
         .ok_or(MultipartRejection::InvalidContentType)?;
 
-    match multer::parse_boundary(content_type) {
-        Ok(boundary) => Ok(boundary),
-        Err(multer::Error::NoBoundary) => Err(MultipartRejection::MissingBoundary),
-        Err(multer::Error::NoMultipart | multer::Error::DecodeContentType(_)) => {
-            Err(MultipartRejection::InvalidContentType)
-        }
-        Err(error) => Err(MultipartRejection::MultipartError(error.to_string())),
+    extract_boundary(content_type)
+}
+
+/// Extract the `boundary` parameter without a full `mime::Mime` parse
+/// (audit C15). Semantics mirror what multer got from the mime crate:
+/// media type must be exactly `multipart/form-data` (no suffix), parameter
+/// names are case-insensitive, values may be quoted, and the FIRST boundary
+/// parameter wins.
+fn extract_boundary(content_type: &str) -> Result<String, MultipartRejection> {
+    let mut segments = content_type.split(';');
+    if !segments
+        .next()
+        .unwrap_or("")
+        .trim()
+        .eq_ignore_ascii_case("multipart/form-data")
+    {
+        return Err(MultipartRejection::InvalidContentType);
     }
+
+    let mut boundary = None;
+    for param in segments {
+        let Some(eq) = param.find('=') else {
+            continue;
+        };
+        if !param[..eq].trim().eq_ignore_ascii_case("boundary") {
+            continue;
+        }
+        let value = param[eq + 1..].trim();
+        let value = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .unwrap_or(value);
+        if boundary.is_none() && !value.is_empty() {
+            boundary = Some(value.to_string());
+        }
+    }
+
+    boundary.ok_or(MultipartRejection::MissingBoundary)
 }
 
 fn build_multer_constraints(constraints: MultipartConstraints) -> multer::Constraints {
@@ -745,5 +778,62 @@ impl Stream for BodyStream {
                 Poll::Pending => return Poll::Pending,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+
+    #[test]
+    fn extracts_plain_quoted_and_case_variants() {
+        assert_eq!(
+            extract_boundary("multipart/form-data; boundary=XyZ123").unwrap(),
+            "XyZ123"
+        );
+        assert_eq!(
+            extract_boundary("multipart/form-data; boundary=\"quoted-value\"").unwrap(),
+            "quoted-value"
+        );
+        assert_eq!(
+            extract_boundary("MULTIPART/FORM-DATA; BOUNDARY=upper").unwrap(),
+            "upper"
+        );
+        // Whitespace around the parameter and value is tolerated.
+        assert_eq!(
+            extract_boundary("multipart/form-data ;  boundary =  spaced ").unwrap(),
+            "spaced"
+        );
+        // First boundary parameter wins (mime-crate semantics).
+        assert_eq!(
+            extract_boundary("multipart/form-data; boundary=first; boundary=second").unwrap(),
+            "first"
+        );
+        // Other parameters are skipped.
+        assert_eq!(
+            extract_boundary("multipart/form-data; charset=utf-8; boundary=late").unwrap(),
+            "late"
+        );
+    }
+
+    #[test]
+    fn rejects_non_multipart_and_missing_boundary() {
+        assert!(matches!(
+            extract_boundary("application/json; boundary=x"),
+            Err(MultipartRejection::InvalidContentType)
+        ));
+        // Suffixed subtypes were rejected by multer too.
+        assert!(matches!(
+            extract_boundary("multipart/form-data+xml; boundary=x"),
+            Err(MultipartRejection::InvalidContentType)
+        ));
+        assert!(matches!(
+            extract_boundary("multipart/form-data"),
+            Err(MultipartRejection::MissingBoundary)
+        ));
+        assert!(matches!(
+            extract_boundary("multipart/form-data; boundary="),
+            Err(MultipartRejection::MissingBoundary)
+        ));
     }
 }

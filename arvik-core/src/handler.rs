@@ -198,6 +198,12 @@ where
     }
 
     fn call(&self, req: Request, state: S) -> BoxFuture<'static, Response> {
+        // NOTE (audit C1): `H::Future` is a generic associated type here, so
+        // the compiler cannot see it is already `Pin<Box<dyn Future>>` (every
+        // blanket impl boxes). The re-box below is therefore inherent on
+        // stable Rust without specialization — same cost axum's HandlerService
+        // pays. Eliminating it needs the Handler-trait state-by-ref migration
+        // (audit O1/R3-5).
         let handler = self.handler.clone();
         let fut = handler.call(req, state);
         Box::pin(fut)

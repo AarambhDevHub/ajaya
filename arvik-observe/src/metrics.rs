@@ -11,7 +11,7 @@ use std::time::Instant;
 use arvik_core::{Body, Request, Response, ResponseBuilder};
 use arvik_router::MatchedPathExt;
 use bytes::Bytes;
-use http_body::Frame;
+use http_body::{Body as _, Frame};
 use prometheus::{
     Encoder, HistogramOpts, HistogramVec, IntCounterVec, IntGaugeVec, Opts, Registry, TextEncoder,
 };
@@ -285,8 +285,6 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        // Owned: `method` must outlive `req`, which moves into the future.
-        let method = req.method().as_str().to_owned();
         let registry = self.registry.clone();
         let labels = self.labels.clone();
         let record_body_sizes = self.record_body_sizes;
@@ -299,13 +297,18 @@ where
             req
         };
 
-        let pending_values = labels.values(&method, PENDING_ROUTE, "pending");
+        // The pending gauge lookup hashes straight off the request borrow —
+        // no owned method copy for it (audit C11).
+        let pending_values = labels.values(req.method().as_str(), PENDING_ROUTE, "pending");
         let in_flight_gauge = registry
             .inner
             .requests_in_flight
             .with_label_values(&pending_values);
         in_flight_gauge.inc();
         let in_flight = InFlightGuard::new(in_flight_gauge.clone());
+
+        // Owned: `method` must outlive `req`, which moves into the future.
+        let method = req.method().as_str().to_owned();
 
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
@@ -314,11 +317,15 @@ where
             let start = Instant::now();
             let mut response = inner.call(req).await?;
             let elapsed = start.elapsed().as_secs_f64();
-            let raw_status = response.status().as_u16();
-            // Owned: `response` is reassigned below for body counting.
-            let status = format!("{raw_status:03}");
+            // `StatusCode::as_str` already returns the canonical zero-padded
+            // form — borrowed from the response instead of a per-request
+            // `format!` (audit C11). Only the streaming branch below needs
+            // to clone it into its callback.
+            let status_code = response.status();
+            let status = status_code.as_str();
+            // Refcount the interned route instead of re-formatting it (C11).
             let route = matched_route(response.extensions());
-            let values = labels.values(&method, &route, &status);
+            let values = labels.values(&method, &route, status);
 
             registry
                 .inner
@@ -339,24 +346,38 @@ where
                     .with_label_values(&values)
                     .observe(request_len);
 
-                let response_bytes = Arc::new(AtomicU64::new(0));
-                let observer = BodyObserver::new({
-                    let registry = registry.clone();
-                    let labels = labels.clone();
-                    let method = method.clone();
-                    let route = route.clone();
-                    let status = status.clone();
-                    move |bytes| {
-                        let values = labels.values(&method, &route, &status);
-                        registry
-                            .inner
-                            .response_body_size
-                            .with_label_values(&values)
-                            .observe(bytes as f64);
+                // A body with an exact size hint (every Content-Length
+                // response) records straight from the hint: no counting
+                // wrapper, atomic, or callback allocation on the hot path
+                // (audit C11). Only genuinely streamed bodies get wrapped.
+                match response.body().size_hint().exact() {
+                    Some(len) => registry
+                        .inner
+                        .response_body_size
+                        .with_label_values(&values)
+                        .observe(len as f64),
+                    None => {
+                        let response_bytes = Arc::new(AtomicU64::new(0));
+                        let observer = BodyObserver::new({
+                            let registry = registry.clone();
+                            let labels = labels.clone();
+                            let method = method.clone();
+                            let route = Arc::clone(&route);
+                            let status = status.to_owned();
+                            move |bytes| {
+                                let values = labels.values(&method, &route, &status);
+                                registry
+                                    .inner
+                                    .response_body_size
+                                    .with_label_values(&values)
+                                    .observe(bytes as f64);
+                            }
+                        });
+                        response = response.map(|body| {
+                            Body::new(CountingBody::new(body, response_bytes, Some(observer)))
+                        });
                     }
-                });
-                response = response
-                    .map(|body| Body::new(CountingBody::new(body, response_bytes, Some(observer))));
+                }
             }
 
             drop(in_flight);
@@ -496,11 +517,11 @@ impl Drop for InFlightGuard {
     }
 }
 
-fn matched_route(extensions: &http::Extensions) -> String {
+fn matched_route(extensions: &http::Extensions) -> Arc<str> {
     extensions
         .get::<MatchedPathExt>()
-        .map(|matched| matched.0.to_string())
-        .unwrap_or_else(|| UNKNOWN_ROUTE.to_string())
+        .map(|matched| Arc::clone(&matched.0))
+        .unwrap_or_else(|| Arc::from(UNKNOWN_ROUTE))
 }
 
 fn default_duration_buckets() -> Vec<f64> {

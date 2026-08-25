@@ -73,19 +73,34 @@ where
 
 impl<T: serde::Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        let mut writer = BytesMut::with_capacity(128).writer();
+        let mut writer = BytesMut::with_capacity(512).writer();
         match serde_json::to_writer(&mut writer, &self.0) {
             Ok(()) => ResponseBuilder::new()
-                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(
+                    http::header::CONTENT_TYPE,
+                    http::header::HeaderValue::from_static("application/json"),
+                )
                 .body(Body::from_bytes(writer.into_inner().freeze())),
             Err(err) => {
                 let body = format!("{{\"error\":\"JSON serialization failed: {}\"}}", err);
                 ResponseBuilder::new()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header(http::header::CONTENT_TYPE, "application/json")
+                    .header(
+                        http::header::CONTENT_TYPE,
+                        http::header::HeaderValue::from_static("application/json"),
+                    )
                     .body(Body::from(body))
             }
         }
+    }
+}
+
+/// Case-insensitive `starts_with`; returns the remainder.
+fn strip_ascii_case_prefix<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
+    if value.len() >= prefix.len() && value[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        Some(&value[prefix.len()..])
+    } else {
+        None
     }
 }
 
@@ -101,8 +116,14 @@ fn json_content_type(headers: &http::HeaderMap) -> bool {
         Err(_) => return false,
     };
 
-    // Fast path for the exact constant — avoids a full Mime parse per request.
+    // Fast paths for the exact constant and its most common parameterized
+    // form — avoid a full Mime parse per request.
     if content_type.eq_ignore_ascii_case("application/json") {
+        return true;
+    }
+    if let Some(rest) = strip_ascii_case_prefix(content_type, "application/json")
+        && (rest.is_empty() || rest.starts_with(';') || rest.trim_start().starts_with(';'))
+    {
         return true;
     }
 
@@ -129,7 +150,10 @@ mod body_limit_tests {
             http::Request::builder()
                 .method(http::Method::POST)
                 .uri("/")
-                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(
+                    http::header::CONTENT_TYPE,
+                    http::header::HeaderValue::from_static("application/json"),
+                )
                 .body(body)
                 .unwrap(),
         )

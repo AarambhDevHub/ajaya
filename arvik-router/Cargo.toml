@@ -19,7 +19,8 @@ futures-util   = { workspace = true }
 tracing        = { workspace = true }
 matchit        = { workspace = true }
 tower-service  = { workspace = true }
-tower-layer    = { workspace = true }
+pin-project-lite = { workspace = true }
+tower-layer     = { workspace = true }
 smallvec       = { workspace = true }
 
 [dev-dependencies]

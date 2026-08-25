@@ -30,13 +30,17 @@ use http::StatusCode;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn, oneshot};
+use crate::layer::{BoxCloneService, LayerFn, apply_layers, into_layer_fn};
 use crate::method_router::{MethodRouter, StateBound};
 use crate::params::PathParams;
 use crate::service::{ServiceHandler, StripPrefixService};
 
 /// Shared sentinel labels for unmatched / fallback dispatch — avoids a heap
 /// allocation per 404 under path-scanning load.
+/// The matched leaf future plus the route pattern (inserted response-side).
+pub(crate) type RouteLeafFut = Pin<Box<dyn Future<Output = Response> + Send>>;
+pub(crate) type RouteLeaf = (RouteLeafFut, Arc<str>);
+
 static FALLBACK_LABEL: std::sync::LazyLock<Arc<str>> =
     std::sync::LazyLock::new(|| Arc::from("__fallback"));
 static UNMATCHED_LABEL: std::sync::LazyLock<Arc<str>> =
@@ -563,7 +567,11 @@ struct RouterInner {
 }
 
 impl RouterInner {
-    async fn dispatch(&self, mut req: Request) -> Response {
+    /// Synchronous routing head (audit C3): trie match + parameter and
+    /// MatchedPath extension inserts happen without entering an async state
+    /// machine; only the matched leaf future is polled asynchronously.
+    #[allow(clippy::result_large_err)] // Err carries the request back only on the rare unmatched path
+    fn route(&self, mut req: Request) -> Result<RouteLeaf, Request> {
         let path = req.uri().path();
 
         match self.trie.at(path) {
@@ -586,16 +594,34 @@ impl RouterInner {
                 }
                 req.extensions_mut().insert(MatchedPathExt(pattern.clone()));
 
-                // Cloning the prebuilt stack is an O(1)-per-wrapper bump now
-                // that MethodRouter shares its handlers behind an Arc.
-                let mut response = match self.layered_routes[idx].as_ref() {
-                    Some(svc) => oneshot(svc.clone(), req).await,
-                    None => entry.method_router.call(req, ()).await,
-                };
+                // Cloning the prebuilt stack is a refcount-bump chain now that
+                // MethodRouter shares its handlers behind an Arc.
+                let fut: Pin<Box<dyn Future<Output = Response> + Send>> =
+                    match self.layered_routes[idx].as_ref() {
+                        Some(svc) => {
+                            let svc = svc.clone();
+                            Box::pin(async move { crate::layer::oneshot(svc, req).await })
+                        }
+                        None => {
+                            // Clone is allocation-free (Arc'd internals).
+                            let mr = entry.method_router.clone();
+                            Box::pin(async move { mr.call(req, ()).await })
+                        }
+                    };
+                Ok((fut, pattern))
+            }
+            Err(_) => Err(req),
+        }
+    }
+
+    async fn dispatch(&self, req: Request) -> Response {
+        match self.route(req) {
+            Ok((fut, pattern)) => {
+                let mut response = fut.await;
                 response.extensions_mut().insert(MatchedPathExt(pattern));
                 response
             }
-            Err(_) => {
+            Err(req) => {
                 if let Some(fb) = &self.fallback {
                     let mut response = fb.clone_box().call(req, ()).await;
                     response

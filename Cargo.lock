@@ -259,6 +259,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "matchit",
+ "pin-project-lite",
  "smallvec",
  "tokio",
  "tower-layer",
