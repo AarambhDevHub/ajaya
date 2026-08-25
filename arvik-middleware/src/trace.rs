@@ -25,7 +25,6 @@
 
 use std::convert::Infallible;
 use std::future::Future;
-use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
@@ -260,7 +259,7 @@ where
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future = TraceFuture<S>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -270,54 +269,73 @@ where
         let span = self.make_span.make_span(&req);
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
-        let latency_unit = self.latency_unit;
-        let log_on_failure = self.log_on_failure;
+        let start = Instant::now();
 
-        Box::pin(async move {
-            let start = Instant::now();
-            // .instrument ties the span to this future only — unlike
-            // span.enter(), it cannot corrupt the thread-local span stack
-            // while the task awaits across worker threads.
-            let response = inner.call(req).instrument(span.clone()).await?;
+        // Concrete future wrapping the inner future via .instrument() — no
+        // per-request heap allocation (audit MW2).
+        TraceFuture {
+            fut: inner.call(req).instrument(span.clone()),
+            span,
+            latency_unit: self.latency_unit,
+            log_on_failure: self.log_on_failure,
+            start,
+        }
+    }
+}
 
-            // When the span was gated off at make_span, skip the latency
-            // formatting and every record/event below — they were pure
-            // allocation on filtered-out requests.
-            if span.is_none() {
-                return Ok(response);
-            }
+// ── Concrete future (audit MW2) ──────────────────────────────────────────────
 
-            let elapsed = start.elapsed();
-            let status = response.status();
-            let latency_str = latency_unit.format(elapsed);
+pin_project_lite::pin_project! {
+    pub struct TraceFuture<S>
+    where
+        S: Service<Request, Response = Response, Error = Infallible>,
+    {
+        #[pin]
+        fut: tracing::instrument::Instrumented<S::Future>,
+        span: Span,
+        latency_unit: LatencyUnit,
+        log_on_failure: bool,
+        start: Instant,
+    }
+}
 
-            span.record("http.status_code", status.as_u16());
-            span.record("latency", latency_str.as_str());
+impl<S> Future for TraceFuture<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible>,
+    S::Future: Send + 'static,
+{
+    type Output = Result<Response, Infallible>;
 
-            if status.is_server_error() && log_on_failure {
-                tracing::error!(
-                    parent: &span,
-                    status = status.as_u16(),
-                    latency = %latency_str,
-                    "server error"
-                );
-            } else if status.is_client_error() {
-                tracing::warn!(
-                    parent: &span,
-                    status = status.as_u16(),
-                    latency = %latency_str,
-                    "client error"
-                );
-            } else {
-                tracing::info!(
-                    parent: &span,
-                    status = status.as_u16(),
-                    latency = %latency_str,
-                    "response"
-                );
-            }
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let res = std::task::ready!(this.fut.poll(cx))?;
+        let span: &Span = this.span;
 
-            Ok(response)
-        })
+        if span.is_none() {
+            return Poll::Ready(Ok(res));
+        }
+
+        let elapsed = this.start.elapsed();
+        let status = res.status();
+        let latency_str = this.latency_unit.format(elapsed);
+
+        span.record("http.status_code", status.as_u16());
+        span.record("latency", latency_str.as_str());
+
+        if status.is_server_error() && *this.log_on_failure {
+            tracing::error!(
+                parent: span, status = status.as_u16(), latency = %latency_str, "server error"
+            );
+        } else if status.is_client_error() {
+            tracing::warn!(
+                parent: span, status = status.as_u16(), latency = %latency_str, "client error"
+            );
+        } else {
+            tracing::info!(
+                parent: span, status = status.as_u16(), latency = %latency_str, "response"
+            );
+        }
+
+        Poll::Ready(Ok(res))
     }
 }

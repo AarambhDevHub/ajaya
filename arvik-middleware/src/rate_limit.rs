@@ -267,13 +267,21 @@ fn extract_ip(req: &Request, trust: &ProxyTrust) -> String {
 
 // ── RateLimitLayer ────────────────────────────────────────────────────────────
 
+/// Immutable per-layer configuration shared behind an Arc so cloning the
+/// per-request service never copies the key extractor or proxy list
+/// (audit MW1).
+#[derive(Debug, Clone)]
+struct RateLimitConfig {
+    extractor: KeyExtractor,
+    proxy_trust: ProxyTrust,
+}
+
 /// Tower layer that enforces a token-bucket rate limit.
 #[derive(Clone)]
 pub struct RateLimitLayer {
     capacity: u64,
     window: Duration,
-    extractor: KeyExtractor,
-    proxy_trust: ProxyTrust,
+    config: Arc<RateLimitConfig>,
     store: Arc<BucketStore>,
 }
 
@@ -293,8 +301,10 @@ impl RateLimitLayer {
         Self {
             capacity,
             window,
-            extractor: KeyExtractor::IpAddress,
-            proxy_trust: ProxyTrust::default(),
+            config: Arc::new(RateLimitConfig {
+                extractor: KeyExtractor::IpAddress,
+                proxy_trust: ProxyTrust::default(),
+            }),
             store: Arc::new(BucketStore::new(window)),
         }
     }
@@ -305,25 +315,26 @@ impl RateLimitLayer {
     /// rightmost non-trusted entry. Without this, IP keys come from the
     /// socket address and proxy headers are ignored.
     pub fn trust_proxies(mut self, proxies: impl IntoIterator<Item = std::net::IpAddr>) -> Self {
-        self.proxy_trust = ProxyTrust::Trusted(proxies.into_iter().collect());
+        let cfg = Arc::make_mut(&mut self.config);
+        cfg.proxy_trust = ProxyTrust::Trusted(proxies.into_iter().collect());
         self
     }
 
     /// Rate limit by a custom request header value.
     pub fn by_header(mut self, header_name: impl Into<String>) -> Self {
-        self.extractor = KeyExtractor::Header(header_name.into());
+        Arc::make_mut(&mut self.config).extractor = KeyExtractor::Header(header_name.into());
         self
     }
 
     /// Apply a single global rate limit (not per-key).
     pub fn global(mut self) -> Self {
-        self.extractor = KeyExtractor::Global;
+        Arc::make_mut(&mut self.config).extractor = KeyExtractor::Global;
         self
     }
 
     /// Use a custom key extractor.
     pub fn with_extractor(mut self, extractor: KeyExtractor) -> Self {
-        self.extractor = extractor;
+        Arc::make_mut(&mut self.config).extractor = extractor;
         self
     }
 }
@@ -336,22 +347,23 @@ impl<S> Layer<S> for RateLimitLayer {
             inner,
             capacity: self.capacity,
             window: self.window,
-            extractor: self.extractor.clone(),
-            proxy_trust: self.proxy_trust.clone(),
-            store: Arc::clone(&self.store),
+            config: std::sync::Arc::clone(&self.config),
+            store: std::sync::Arc::clone(&self.store),
         }
     }
 }
 
 /// Tower service produced by [`RateLimitLayer`].
+///
+/// All heavy configuration lives behind the shared `config` Arc — cloning
+/// this service per request is refcount bumps only (audit MW1).
 #[derive(Clone)]
 pub struct RateLimitService<S> {
     inner: S,
     capacity: u64,
     window: Duration,
-    extractor: KeyExtractor,
-    proxy_trust: ProxyTrust,
-    store: Arc<BucketStore>,
+    config: std::sync::Arc<RateLimitConfig>,
+    store: std::sync::Arc<BucketStore>,
 }
 
 impl<S> Service<Request> for RateLimitService<S>
@@ -368,7 +380,10 @@ where
     }
 
     fn call(&mut self, req: Request) -> Self::Future {
-        let key = self.extractor.extract_key(&req, &self.proxy_trust);
+        let key = self
+            .config
+            .extractor
+            .extract_key(&req, &self.config.proxy_trust);
         let capacity = self.capacity;
         let window = self.window;
         let store = Arc::clone(&self.store);

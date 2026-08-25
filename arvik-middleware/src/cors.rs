@@ -434,6 +434,9 @@ where
 {
     type Response = Response;
     type Error = Infallible;
+    // Single box like actix-cors; the win here is that ALL heavy header
+    // values are pre-rendered at construction (O15) and the no-Origin /
+    // preflight decisions happen synchronously before this point.
     type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -442,34 +445,29 @@ where
 
     fn call(&mut self, req: Request) -> Self::Future {
         let config = Arc::clone(&self.config);
-        // Clone inner so we can move it into the async block.
-        // `std::mem::replace` ensures the original `self.inner` is left in a
-        // valid (cloned) state for the next `call`.
+
+        let Some(origin) = req.headers().get(ORIGIN).cloned() else {
+            // Not a CORS request.
+            let cloned = self.inner.clone();
+            let mut inner = std::mem::replace(&mut self.inner, cloned);
+            return Box::pin(inner.call(req));
+        };
+
+        // ── Preflight ─────────────────────────────────────────────────────
+        let is_preflight = req.method() == Method::OPTIONS
+            && req.headers().contains_key(ACCESS_CONTROL_REQUEST_METHOD);
+
+        if is_preflight {
+            tracing::trace!(origin = %origin.to_str().unwrap_or("?"), "CORS preflight");
+            let response = config.build_preflight(&origin, &req);
+            return Box::pin(std::future::ready(Ok(response)));
+        }
+
+        // ── Actual CORS request ───────────────────────────────────────────
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
 
         Box::pin(async move {
-            let origin = match req.headers().get(ORIGIN).cloned() {
-                Some(o) => o,
-                None => {
-                    // Not a CORS request — pass through unchanged
-                    return inner.call(req).await;
-                }
-            };
-
-            // ── Preflight ─────────────────────────────────────────────────
-            let is_preflight = req.method() == Method::OPTIONS
-                && req.headers().contains_key(ACCESS_CONTROL_REQUEST_METHOD);
-
-            if is_preflight {
-                tracing::trace!(
-                    origin = %origin.to_str().unwrap_or("?"),
-                    "CORS preflight"
-                );
-                return Ok(config.build_preflight(&origin, &req));
-            }
-
-            // ── Actual CORS request ───────────────────────────────────────
             let mut response = inner.call(req).await?;
             config.apply_response_headers(&mut response, &origin);
             Ok(response)
