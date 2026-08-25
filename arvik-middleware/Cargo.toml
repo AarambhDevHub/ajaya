@@ -23,6 +23,7 @@ mime              = { workspace = true }
 uuid = { workspace = true }
 futures-util = { workspace = true }
 parking_lot = { workspace = true }
+pin-project-lite = { workspace = true }
 base64 = { workspace = true }
 cookie = { workspace = true }
 http-body = { workspace = true }

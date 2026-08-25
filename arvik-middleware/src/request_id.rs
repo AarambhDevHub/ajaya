@@ -103,11 +103,11 @@ pub struct RequestIdService<S> {
 impl<S> Service<Request> for RequestIdService<S>
 where
     S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
-    S::Future: Send + 'static,
+    S::Future: Send + Unpin + 'static,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future = RequestIdFuture<S>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -139,16 +139,36 @@ where
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
 
-        Box::pin(async move {
-            let mut response = inner.call(req).await?;
+        RequestIdFuture {
+            fut: inner.call(req),
+            response_header,
+        }
+    }
+}
 
-            // Propagate the request ID to the response
-            if let Some(val) = response_header {
-                response.headers_mut().insert(X_REQUEST_ID, val);
-            }
+/// Concrete future for [`RequestIdService`] — no heap allocation per request
+/// (audit MW2).
+pub struct RequestIdFuture<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible>,
+{
+    fut: S::Future,
+    response_header: Option<HeaderValue>,
+}
 
-            Ok(response)
-        })
+impl<S> Future for RequestIdFuture<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible>,
+    S::Future: Unpin,
+{
+    type Output = Result<Response, Infallible>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut res = std::task::ready!(Pin::new(&mut self.fut).poll(cx))?;
+        if let Some(val) = self.response_header.take() {
+            res.headers_mut().insert(X_REQUEST_ID, val);
+        }
+        Poll::Ready(Ok(res))
     }
 }
 
@@ -185,11 +205,11 @@ pub struct PropagateRequestIdService<S> {
 impl<S> Service<Request> for PropagateRequestIdService<S>
 where
     S: Service<Request, Response = Response, Error = Infallible> + Clone + Send + 'static,
-    S::Future: Send + 'static,
+    S::Future: Send + Unpin + 'static,
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future = RequestIdFuture<S>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -201,14 +221,9 @@ where
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
 
-        Box::pin(async move {
-            let mut response = inner.call(req).await?;
-
-            if let Some(id) = incoming_id {
-                response.headers_mut().insert(X_REQUEST_ID, id);
-            }
-
-            Ok(response)
-        })
+        RequestIdFuture {
+            fut: inner.call(req),
+            response_header: incoming_id,
+        }
     }
 }

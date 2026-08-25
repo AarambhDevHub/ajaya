@@ -209,6 +209,7 @@ dependencies = [
  "http-body",
  "mime",
  "parking_lot",
+ "pin-project-lite",
  "tokio",
  "tokio-util",
  "tower-layer",

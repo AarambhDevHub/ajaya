@@ -66,7 +66,7 @@ where
 {
     type Response = Response;
     type Error = Infallible;
-    type Future = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send + 'static>>;
+    type Future = TimeoutFuture<S>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -75,23 +75,61 @@ where
     fn call(&mut self, req: Request) -> Self::Future {
         let cloned = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, cloned);
-        let duration = self.duration;
 
-        Box::pin(async move {
-            match tokio::time::timeout(duration, inner.call(req)).await {
-                Ok(result) => result,
-                Err(_elapsed) => {
-                    tracing::warn!("Request timed out after {:?}", duration);
-                    Ok(http::Response::builder()
-                        .status(StatusCode::REQUEST_TIMEOUT)
-                        .header(http::header::CONTENT_TYPE, "application/json")
-                        .body(Body::from(format!(
-                            r#"{{"error":"Request Timeout","code":408,"message":"Request exceeded the {}ms time limit"}}"#,
-                            duration.as_millis()
-                        )))
-                        .unwrap())
-                }
-            }
-        })
+        TimeoutFuture {
+            fut: inner.call(req),
+            sleep: tokio::time::sleep(self.duration),
+            duration: self.duration,
+        }
+    }
+}
+
+// Concrete future for [`TimeoutService`] — polls the handler and a deadline
+// side-by-side with no heap allocation per request (audit MW2).
+pin_project_lite::pin_project! {
+    pub struct TimeoutFuture<S>
+    where
+        S: Service<Request, Response = Response, Error = Infallible>,
+    {
+        #[pin]
+        fut: S::Future,
+        #[pin]
+        sleep: tokio::time::Sleep,
+        duration: Duration,
+    }
+}
+
+impl<S> Future for TimeoutFuture<S>
+where
+    S: Service<Request, Response = Response, Error = Infallible>,
+    S::Future: Send + 'static,
+{
+    type Output = Result<Response, Infallible>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+        // Handler wins ties.
+        if let Poll::Ready(result) = this.fut.as_mut().poll(cx) {
+            return match result {
+                Ok(response) => Poll::Ready(Ok(response)),
+                Err(e) => match e {},
+            };
+        }
+
+        if Future::poll(this.sleep.as_mut(), cx).is_ready() {
+            tracing::warn!("Request timed out after {:?}", this.duration);
+            return Poll::Ready(Ok(
+                http::Response::builder()
+                    .status(StatusCode::REQUEST_TIMEOUT)
+                    .header(http::header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"error":"Request Timeout","code":408,"message":"Request exceeded the {}ms time limit"}}"#,
+                        this.duration.as_millis()
+                    )))
+                    .unwrap()
+            ));
+        }
+
+        Poll::Pending
     }
 }
