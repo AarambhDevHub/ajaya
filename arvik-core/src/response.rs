@@ -115,8 +115,11 @@ impl ResponseBuilder {
     ///
     /// Sets `Content-Type: text/html; charset=utf-8`.
     pub fn html(self, html: impl Into<String>) -> Response {
-        self.header(http::header::CONTENT_TYPE, "text/html; charset=utf-8")
-            .body(Body::from(html.into()))
+        self.header(
+            http::header::CONTENT_TYPE,
+            http::header::HeaderValue::from_static("text/html; charset=utf-8"),
+        )
+        .body(Body::from(html.into()))
     }
 
     /// Build a plain text response from static data.
@@ -135,8 +138,11 @@ impl ResponseBuilder {
     ///
     /// Sets `Content-Type: text/plain; charset=utf-8`.
     pub fn text(self, text: impl Into<String>) -> Response {
-        self.header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
-            .body(Body::from(text.into()))
+        self.header(
+            http::header::CONTENT_TYPE,
+            http::header::HeaderValue::from_static("text/plain; charset=utf-8"),
+        )
+        .body(Body::from(text.into()))
     }
 
     /// Build a response with an empty body.
@@ -155,7 +161,10 @@ impl Default for ResponseBuilder {
 fn internal_error_response() -> Response {
     http::Response::builder()
         .status(StatusCode::INTERNAL_SERVER_ERROR)
-        .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(
+            http::header::CONTENT_TYPE,
+            http::header::HeaderValue::from_static("text/plain; charset=utf-8"),
+        )
         .body(Body::from("Internal Server Error"))
         .expect("static fallback response is valid")
 }

@@ -9,7 +9,7 @@ use std::convert::Infallible;
 use std::future::Future;
 #[cfg(feature = "embed")]
 use std::marker::PhantomData;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -34,7 +34,9 @@ type BoxFutureResponse = Pin<Box<dyn Future<Output = Result<Response, Infallible
 #[derive(Clone)]
 pub struct ServeDir {
     root: Arc<PathBuf>,
-    fallback: Option<BoxCloneService>,
+    /// Behind an Arc so the per-request service clone is a refcount bump —
+    /// only an actual fallback invocation pays for the inner clone (C12).
+    fallback: Option<Arc<BoxCloneService>>,
     precompressed_gzip: bool,
     precompressed_br: bool,
     call_fallback_on_method_not_allowed: bool,
@@ -89,7 +91,7 @@ impl ServeDir {
             + 'static,
         S::Future: Send + 'static,
     {
-        self.fallback = Some(BoxCloneService::new(service));
+        self.fallback = Some(Arc::new(BoxCloneService::new(service)));
         self
     }
 
@@ -156,7 +158,7 @@ impl ServeDir {
             Err(()) => return self.call_fallback(req).await,
         };
 
-        let candidate = self.root.join(&relative.fs_path);
+        let candidate = self.root.join(&relative.asset_path);
 
         // Symlink containment: a planted link must not serve bytes from
         // outside the (canonicalized) root. Checked on the canonical path so
@@ -176,8 +178,8 @@ impl ServeDir {
             return self.handle_directory(req, relative, candidate).await;
         }
 
-        let accepts_br = self.precompressed_br && accepts_encoding(&req, "br");
-        let accepts_gzip = self.precompressed_gzip && accepts_encoding(&req, "gzip");
+        let (accepts_br, accepts_gzip) =
+            accepted_precompressed(&req, self.precompressed_br, self.precompressed_gzip);
 
         match self
             .select_file(
@@ -214,8 +216,8 @@ impl ServeDir {
             if index_meta.as_ref().is_ok_and(|m| m.is_file()) {
                 let index_meta = index_meta.unwrap();
                 let index_asset_path = join_asset_path(&relative.asset_path, INDEX_FILE);
-                let accepts_br = self.precompressed_br && accepts_encoding(&req, "br");
-                let accepts_gzip = self.precompressed_gzip && accepts_encoding(&req, "gzip");
+                let (accepts_br, accepts_gzip) =
+                    accepted_precompressed(&req, self.precompressed_br, self.precompressed_gzip);
 
                 return match self
                     .select_file(
@@ -259,16 +261,23 @@ impl ServeDir {
     ) -> Result<FsCandidate, ()> {
         let content_type = content_type(asset_path);
 
+        // Probe order: `.br` → `.gz` → plain. Each probe is a single open
+        // attempt (a miss costs one failed open instead of stat+open pairs —
+        // audit C7b); `serve_fs_asset` re-validates via the open descriptor.
+        let mut path = path;
+        let mut content_encoding: Option<HeaderValue> = None;
+
         if accepts_br {
             let br_path = append_suffix(&path, ".br");
-            if tokio::fs::metadata(&br_path)
-                .await
-                .is_ok_and(|m| m.is_file())
+            if let Ok(meta) = tokio::fs::File::open(&br_path).await
+                && meta.metadata().await.is_ok_and(|m| m.is_file())
             {
+                path = br_path;
+                content_encoding = Some(HeaderValue::from_static("br"));
                 return Ok(FsCandidate {
-                    path: br_path,
+                    path,
                     content_type,
-                    content_encoding: Some(HeaderValue::from_static("br")),
+                    content_encoding,
                     vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
                 });
             }
@@ -276,36 +285,38 @@ impl ServeDir {
 
         if accepts_gzip {
             let gz_path = append_suffix(&path, ".gz");
-            if tokio::fs::metadata(&gz_path)
-                .await
-                .is_ok_and(|m| m.is_file())
+            if let Ok(meta) = tokio::fs::File::open(&gz_path).await
+                && meta.metadata().await.is_ok_and(|m| m.is_file())
             {
+                path = gz_path;
+                content_encoding = Some(HeaderValue::from_static("gzip"));
                 return Ok(FsCandidate {
-                    path: gz_path,
+                    path,
                     content_type,
-                    content_encoding: Some(HeaderValue::from_static("gzip")),
+                    content_encoding,
                     vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
                 });
             }
         }
 
         // `handle` already statted this exact path and ruled out directories —
-        // reuse that metadata instead of a second syscall. A file vanishing
-        // between here and the open fails safely inside `serve_fs_asset`.
+        // reuse that metadata instead of a second syscall.
         if !existing.is_file() {
             return Err(());
         }
         Ok(FsCandidate {
             path,
             content_type,
-            content_encoding: None,
+            content_encoding,
             vary_accept_encoding: self.precompressed_gzip || self.precompressed_br,
         })
     }
 
     async fn call_fallback(&self, req: Request) -> Response {
         match &self.fallback {
-            Some(service) => call_boxed(service.clone(), req).await,
+            // The Arc deref clone is the one heap copy; it happens only when
+            // the fallback actually runs.
+            Some(service) => call_boxed((**service).clone(), req).await,
             None => not_found(),
         }
     }
@@ -403,8 +414,8 @@ impl ServeFile {
         }
 
         let head = req.method() == Method::HEAD;
-        let accepts_br = self.precompressed_br && accepts_encoding(&req, "br");
-        let accepts_gzip = self.precompressed_gzip && accepts_encoding(&req, "gzip");
+        let (accepts_br, accepts_gzip) =
+            accepted_precompressed(&req, self.precompressed_br, self.precompressed_gzip);
 
         match self.select_file(accepts_br, accepts_gzip).await {
             Ok(asset) => {
@@ -415,11 +426,12 @@ impl ServeFile {
     }
 
     async fn select_file(&self, accepts_br: bool, accepts_gzip: bool) -> Result<FsCandidate, ()> {
+        // Probe order: `.br` → `.gz` → plain; each probe is a single open
+        // attempt (audit C7b).
         if accepts_br {
             let br_path = append_suffix(&self.path, ".br");
-            if tokio::fs::metadata(&br_path)
-                .await
-                .is_ok_and(|m| m.is_file())
+            if let Ok(f) = tokio::fs::File::open(&br_path).await
+                && f.metadata().await.is_ok_and(|m| m.is_file())
             {
                 return Ok(FsCandidate {
                     path: br_path,
@@ -432,9 +444,8 @@ impl ServeFile {
 
         if accepts_gzip {
             let gz_path = append_suffix(&self.path, ".gz");
-            if tokio::fs::metadata(&gz_path)
-                .await
-                .is_ok_and(|m| m.is_file())
+            if let Ok(f) = tokio::fs::File::open(&gz_path).await
+                && f.metadata().await.is_ok_and(|m| m.is_file())
             {
                 return Ok(FsCandidate {
                     path: gz_path,
@@ -479,7 +490,9 @@ impl Service<Request> for ServeFile {
 /// Serve assets embedded with `rust-embed`.
 #[cfg(feature = "embed")]
 pub struct EmbeddedFileService<A> {
-    fallback: Option<BoxCloneService>,
+    /// Behind an Arc so the per-request service clone is a refcount bump —
+    /// only an actual fallback invocation pays for the inner clone (C12).
+    fallback: Option<Arc<BoxCloneService>>,
     precompressed_gzip: bool,
     precompressed_br: bool,
     call_fallback_on_method_not_allowed: bool,
@@ -534,7 +547,7 @@ where
             + 'static,
         S::Future: Send + 'static,
     {
-        self.fallback = Some(BoxCloneService::new(service));
+        self.fallback = Some(Arc::new(BoxCloneService::new(service)));
         self
     }
 
@@ -593,14 +606,19 @@ where
             Err(()) => return self.call_fallback(req).await,
         };
 
+        // File hit first (audit C8): `A::get` is O(1), while
+        // `embedded_dir_exists` scans every embedded name. rust-embed output
+        // cannot hold a name that is both a live file and a directory prefix,
+        // so the reorder preserves behavior.
+        if let Some(asset) = self.select_file(&relative.asset_path, &req) {
+            return serve_embedded_asset(asset, req, head, self.cache_control);
+        }
+
         if self.embedded_dir_exists(&relative.asset_path) {
             return self.handle_directory(req, relative).await;
         }
 
-        match self.select_file(&relative.asset_path, &req) {
-            Some(asset) => serve_embedded_asset(asset, req, head, self.cache_control),
-            None => self.call_fallback(req).await,
-        }
+        self.call_fallback(req).await
     }
 
     async fn handle_directory(self, req: Request, relative: RelativePath) -> Response {
@@ -626,11 +644,14 @@ where
 
     fn select_file(&self, asset_path: &str, req: &Request) -> Option<EmbeddedAsset> {
         let content_type = content_type(asset_path);
+        let (accepts_br, accepts_gzip) =
+            accepted_precompressed(req, self.precompressed_br, self.precompressed_gzip);
 
-        if self.precompressed_br && accepts_encoding(req, "br") {
+        if accepts_br {
             let br_path = format!("{asset_path}.br");
             if let Some(file) = A::get(&br_path) {
                 return Some(EmbeddedAsset::new(
+                    &br_path,
                     file,
                     content_type.clone(),
                     Some(HeaderValue::from_static("br")),
@@ -639,10 +660,11 @@ where
             }
         }
 
-        if self.precompressed_gzip && accepts_encoding(req, "gzip") {
+        if accepts_gzip {
             let gz_path = format!("{asset_path}.gz");
             if let Some(file) = A::get(&gz_path) {
                 return Some(EmbeddedAsset::new(
+                    &gz_path,
                     file,
                     content_type.clone(),
                     Some(HeaderValue::from_static("gzip")),
@@ -653,6 +675,7 @@ where
 
         A::get(asset_path).map(|file| {
             EmbeddedAsset::new(
+                asset_path,
                 file,
                 content_type,
                 None,
@@ -673,7 +696,9 @@ where
 
     async fn call_fallback(&self, req: Request) -> Response {
         match &self.fallback {
-            Some(service) => call_boxed(service.clone(), req).await,
+            // The Arc deref clone is the one heap copy; it happens only when
+            // the fallback actually runs.
+            Some(service) => call_boxed((**service).clone(), req).await,
             None => not_found(),
         }
     }
@@ -928,19 +953,62 @@ struct EmbeddedAsset {
 }
 
 #[cfg(feature = "embed")]
+/// Hash-derived per-asset facts. Immutable for the life of the binary, so a
+/// process-wide cache builds each entry once instead of hex-formatting the
+/// sha256 + validating an ETag header on every request (audit C14).
+struct EmbeddedMeta {
+    modified: Option<SystemTime>,
+    etag: HeaderValue,
+}
+
+#[cfg(feature = "embed")]
+fn embedded_meta(
+    asset_path: &str,
+    sha256: &[u8; 32],
+    last_modified: Option<u64>,
+) -> std::sync::Arc<EmbeddedMeta> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    static CACHE: OnceLock<Mutex<HashMap<Box<str>, Arc<EmbeddedMeta>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Hit path: no key allocation, no write lock.
+    if let Ok(map) = cache.try_lock()
+        && let Some(meta) = map.get(asset_path)
+    {
+        return Arc::clone(meta);
+    }
+    let mut map = cache.lock().expect("embedded metadata cache poisoned");
+    if let Some(meta) = map.get(asset_path) {
+        return Arc::clone(meta);
+    }
+    let meta = Arc::new(EmbeddedMeta {
+        modified: last_modified.map(|seconds| UNIX_EPOCH + Duration::from_secs(seconds)),
+        etag: embedded_etag(sha256),
+    });
+    map.insert(Box::from(asset_path), Arc::clone(&meta));
+    meta
+}
+
+#[cfg(feature = "embed")]
 impl EmbeddedAsset {
     fn new(
+        asset_path: &str,
         file: rust_embed::EmbeddedFile,
         content_type: HeaderValue,
         content_encoding: Option<HeaderValue>,
         vary_accept_encoding: bool,
     ) -> Self {
         let len = file.data.len() as u64;
-        let etag = embedded_etag(&file.metadata.sha256_hash());
-        let modified = file
-            .metadata
-            .last_modified()
-            .map(|seconds| UNIX_EPOCH + Duration::from_secs(seconds));
+        let meta = embedded_meta(
+            asset_path,
+            &file.metadata.sha256_hash(),
+            file.metadata.last_modified(),
+        );
+        let modified = meta.modified;
+        let etag = meta.etag.clone();
+        drop(meta);
         let bytes = match file.data {
             std::borrow::Cow::Borrowed(bytes) => Bytes::from_static(bytes),
             std::borrow::Cow::Owned(bytes) => Bytes::from(bytes),
@@ -1065,7 +1133,9 @@ async fn path_contained(
 
 #[derive(Debug)]
 struct RelativePath {
-    fs_path: PathBuf,
+    /// Normalized, decoded request path. Doubles as the filesystem-relative
+    /// path (`Path::join` views it) — one allocation serves both roles
+    /// (audit C9).
     asset_path: String,
 }
 
@@ -1078,28 +1148,32 @@ fn relative_path(path: &str) -> Result<RelativePath, ()> {
         .decode_utf8()
         .map_err(|_| ())?;
 
-    if decoded.contains('\\') || decoded.contains('\0') {
+    // Validate and normalize in one pass over the decoded bytes: keep Normal
+    // components separated by '/', drop empty (`//`) and `.` segments, reject
+    // traversal. This replaces `Path::components` machinery plus a Vec of
+    // per-component Strings plus `join` with a single sized allocation
+    // (audit C9). The leading-slash trim above rules out RootDir, and decoded
+    // `%2F`s split exactly like real separators did under `components()`.
+    // A decoded `%2F` at the front re-creates RootDir; keep rejecting it.
+    if decoded.starts_with('/') || decoded.contains('\\') || decoded.contains('\0') {
         return Err(());
     }
 
-    let mut fs_path = PathBuf::new();
-    let mut asset_parts = Vec::new();
-
-    for component in Path::new(decoded.as_ref()).components() {
-        match component {
-            Component::Normal(part) => {
-                fs_path.push(part);
-                asset_parts.push(part.to_string_lossy().into_owned());
+    let mut asset_path = String::with_capacity(decoded.len());
+    for part in decoded.split('/') {
+        match part {
+            "" | "." => {}          // empty (`//`) or CurDir
+            ".." => return Err(()), // ParentDir
+            _ => {
+                if !asset_path.is_empty() {
+                    asset_path.push('/');
+                }
+                asset_path.push_str(part);
             }
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return Err(()),
         }
     }
 
-    Ok(RelativePath {
-        fs_path,
-        asset_path: asset_parts.join("/"),
-    })
+    Ok(RelativePath { asset_path })
 }
 
 fn valid_percent_encoding(path: &str) -> bool {
@@ -1126,12 +1200,56 @@ fn is_get_or_head(method: &Method) -> bool {
 }
 
 fn content_type(path: &str) -> HeaderValue {
-    HeaderValue::from_str(
-        mime_guess::from_path(path)
-            .first_or_octet_stream()
-            .essence_str(),
-    )
-    .expect("MIME values are valid headers")
+    // MIME-for-extension is constant — resolve the hot web types to 'static
+    // header values and skip mime_guess + per-request validation entirely
+    // (audit C10). Values mirror mime_guess 2.0.5's table exactly; anything
+    // uncommon falls through to it unchanged.
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    // mime_guess lowercases before lookup — match that without allocating in
+    // the already-lowercase common case.
+    let owned;
+    let ext = if ext.bytes().any(|b| b.is_ascii_uppercase()) {
+        owned = ext.to_ascii_lowercase();
+        owned.as_str()
+    } else {
+        ext
+    };
+    let mime = match ext {
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" => "text/javascript",
+        "mjs" => "application/javascript",
+        "json" => "application/json",
+        "txt" => "text/plain",
+        "xml" => "text/xml",
+        "svg" => "image/svg+xml",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "ico" => "image/x-icon",
+        "wasm" => "application/wasm",
+        "woff" => "application/font-woff",
+        "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "application/font-sfnt",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "pdf" => "application/pdf",
+        _ => {
+            return HeaderValue::from_str(
+                mime_guess::from_path(path)
+                    .first_or_octet_stream()
+                    .essence_str(),
+            )
+            .expect("MIME values are valid headers");
+        }
+    };
+    HeaderValue::from_static(mime)
 }
 
 fn append_suffix(path: &Path, suffix: &str) -> PathBuf {
@@ -1154,19 +1272,32 @@ fn join_asset_path(base: &str, file: &str) -> String {
     }
 }
 
-fn accepts_encoding(req: &Request, encoding: &str) -> bool {
-    // Combine every header line (RFC 9110 §5.2 allows multi-line lists) and
-    // negotiate with q-value semantics — the old single-line `any()` check let
-    // `*;q=1` override an explicit `br;q=0` refusal.
-    let combined = req
-        .headers()
-        .get_all(header::ACCEPT_ENCODING)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .collect::<Vec<_>>()
-        .join(", ");
+/// RFC 9110 §5.2 allows multi-line lists — fold every header line into one
+/// string without an intermediate Vec so both precompressed probes share a
+/// single header read (audit C13).
+fn combined_accept_encoding(req: &Request) -> String {
+    let mut combined = String::new();
+    for value in req.headers().get_all(header::ACCEPT_ENCODING) {
+        if let Ok(v) = value.to_str() {
+            if !combined.is_empty() {
+                combined.push_str(", ");
+            }
+            combined.push_str(v);
+        }
+    }
+    combined
+}
 
-    arvik_core::accept::negotiate(&[encoding], &combined).is_some()
+/// Negotiate both encodings from one combined header string. Q-value
+/// semantics apply — a bare `*;q=1` does not override an explicit
+/// `br;q=0` refusal.
+fn accepted_precompressed(req: &Request, want_br: bool, want_gzip: bool) -> (bool, bool) {
+    if !(want_br || want_gzip) {
+        return (false, false);
+    }
+    let combined = combined_accept_encoding(req);
+    let ok = |enc: &str| arvik_core::accept::negotiate(&[enc], &combined).is_some();
+    (want_br && ok("br"), want_gzip && ok("gzip"))
 }
 
 #[derive(Clone, Copy)]
@@ -1678,6 +1809,70 @@ mod tests {
         let res = service.call(request("/dir/")).await.unwrap();
         assert!(embedded_text(res).await.contains("file.txt"));
     }
+    // ── round 3: relative_path normalization, content_type table parity ─────
+
+    #[test]
+    fn relative_path_normalizes_and_rejects_traversal() {
+        // Normalization: duplicate slashes, dot segments, trailing slash.
+        assert_eq!(
+            relative_path("//assets//js/./app.js/").unwrap().asset_path,
+            "assets/js/app.js"
+        );
+        // Root request collapses to empty.
+        assert_eq!(relative_path("/").unwrap().asset_path, "");
+        assert_eq!(relative_path("").unwrap().asset_path, "");
+
+        // Rejections: parent traversal (raw and percent-encoded), decoded
+        // RootDir (%2F at the front), backslashes, NUL.
+        assert!(relative_path("/../etc/passwd").is_err());
+        assert!(relative_path("/a/../../etc/passwd").is_err());
+        assert!(relative_path("/%2e%2e/etc/passwd").is_err());
+        assert!(relative_path("/a/%2e%2e/passwd").is_err());
+        assert!(relative_path("/%2Fetc%2Fpasswd").is_err());
+        assert!(relative_path("/a\\b").is_err());
+        assert!(relative_path("/a\0b").is_err());
+
+        // Consecutive dots inside a name are NOT traversal.
+        assert_eq!(
+            relative_path("/logo..final.png").unwrap().asset_path,
+            "logo..final.png"
+        );
+        // Invalid percent escapes rejected before decode.
+        assert!(relative_path("/a%zz").is_err());
+    }
+
+    #[test]
+    fn content_type_matches_mime_guess_for_table_and_fallbacks() {
+        let tabled = [
+            "a.html", "a.htm", "a.css", "a.js", "a.mjs", "a.json", "a.txt", "a.xml", "a.svg",
+            "a.png", "a.jpg", "a.jpeg", "a.gif", "a.webp", "a.avif", "a.ico", "a.wasm", "a.woff",
+            "a.woff2", "a.ttf", "a.otf", "a.mp4", "a.webm", "a.pdf",
+        ];
+        for path in tabled {
+            let expected = HeaderValue::from_str(
+                mime_guess::from_path(path)
+                    .first_or_octet_stream()
+                    .essence_str(),
+            )
+            .unwrap();
+            assert_eq!(content_type(path), expected, "table drift for {path}");
+        }
+
+        // Case-insensitive lookup, same as mime_guess.
+        assert_eq!(content_type("A.PNG"), content_type("a.png"));
+
+        // Fallbacks: unknown extension, no extension, dotfile.
+        for path in ["a.xyz123", "noext", ".hidden", "dir.d/", "trailing."] {
+            let expected = HeaderValue::from_str(
+                mime_guess::from_path(path)
+                    .first_or_octet_stream()
+                    .essence_str(),
+            )
+            .unwrap();
+            assert_eq!(content_type(path), expected, "fallback drift for {path}");
+        }
+    }
+
     // ── audit group 7: If-Range, symlink containment ─────────────────────────
 
     #[test]

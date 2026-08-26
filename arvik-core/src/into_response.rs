@@ -154,7 +154,10 @@ impl IntoResponse for StatusCode {
 impl IntoResponse for String {
     fn into_response(self) -> Response {
         ResponseBuilder::new()
-            .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .header(
+                http::header::CONTENT_TYPE,
+                http::header::HeaderValue::from_static("text/plain; charset=utf-8"),
+            )
             .body(Body::from(self))
     }
 }
@@ -162,7 +165,10 @@ impl IntoResponse for String {
 impl IntoResponse for &'static str {
     fn into_response(self) -> Response {
         ResponseBuilder::new()
-            .header(http::header::CONTENT_TYPE, "text/plain; charset=utf-8")
+            .header(
+                http::header::CONTENT_TYPE,
+                http::header::HeaderValue::from_static("text/plain; charset=utf-8"),
+            )
             .body(Body::from(self))
     }
 }
@@ -174,7 +180,10 @@ impl IntoResponse for &'static str {
 impl IntoResponse for Bytes {
     fn into_response(self) -> Response {
         ResponseBuilder::new()
-            .header(http::header::CONTENT_TYPE, "application/octet-stream")
+            .header(
+                http::header::CONTENT_TYPE,
+                http::header::HeaderValue::from_static("application/octet-stream"),
+            )
             .body(Body::from(self))
     }
 }
@@ -421,13 +430,19 @@ impl<T: serde::Serialize> IntoResponse for Json<T> {
         let mut writer = BytesMut::with_capacity(128).writer();
         match serde_json::to_writer(&mut writer, &self.0) {
             Ok(()) => ResponseBuilder::new()
-                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(
+                    http::header::CONTENT_TYPE,
+                    http::header::HeaderValue::from_static("application/json"),
+                )
                 .body(Body::from_bytes(writer.into_inner().freeze())),
             Err(err) => {
                 tracing::error!("JSON serialization failed: {err}");
                 ResponseBuilder::new()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header(http::header::CONTENT_TYPE, "application/json")
+                    .header(
+                        http::header::CONTENT_TYPE,
+                        http::header::HeaderValue::from_static("application/json"),
+                    )
                     .body(Body::from(r#"{"error":"Serialization failed","code":500}"#))
             }
         }
@@ -455,7 +470,10 @@ pub struct Html<T>(pub T);
 impl<T: Into<String>> IntoResponse for Html<T> {
     fn into_response(self) -> Response {
         ResponseBuilder::new()
-            .header(http::header::CONTENT_TYPE, "text/html; charset=utf-8")
+            .header(
+                http::header::CONTENT_TYPE,
+                http::header::HeaderValue::from_static("text/html; charset=utf-8"),
+            )
             .body(Body::from(self.0.into()))
     }
 }
